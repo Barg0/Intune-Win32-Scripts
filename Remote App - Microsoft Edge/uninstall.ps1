@@ -67,33 +67,56 @@ Write-Log "======== Script Started ========" -Tag "Start"
 Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | Application: $applicationName" -Tag "Info"
 
 # ---------------------------[ Variables ]---------------------------
-$LocalFolderName = "RemoteDesktopApps"
-$RdpFileName     = "MicrosoftEdge.rdp"
-$ShortcutName    = "Microsoft Edge (RDP)"   # Without .lnk
+$LocalFolderName          = "RemoteDesktopApps"
+$RdpFileName              = "MicrosoftEdge.rdp"
+$IconFileName             = "MicrosoftEdge.ico"
+$DesktopShortcutName      = "Microsoft Edge (RDP)"   # Without .lnk
+$StartMenuShortcutName    = "Microsoft Edge (RDP)"   # Without .lnk
 
-$TargetFolderPath = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
-$TargetRdpPath    = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
-$DesktopPath      = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath     = Join-Path -Path $DesktopPath -ChildPath ($ShortcutName + ".lnk")
+$TargetFolderPath         = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
+$TargetRdpPath            = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
+$TargetIconPath           = Join-Path -Path $TargetFolderPath -ChildPath $IconFileName
+
+$DesktopPath              = [Environment]::GetFolderPath("Desktop")
+$DesktopShortcutPath      = Join-Path -Path $DesktopPath -ChildPath ($DesktopShortcutName + ".lnk")
+
+$StartMenuRoot            = [Environment]::GetFolderPath("StartMenu")
+$StartMenuPrograms        = Join-Path -Path $StartMenuRoot -ChildPath "Programs"
+$StartMenuShortcutPath    = Join-Path -Path $StartMenuPrograms -ChildPath ($StartMenuShortcutName + ".lnk")
 
 # ---------------------------[ Removal Steps ]---------------------------
 
 # 1) Remove Desktop Shortcut
-Write-Log "Checking for desktop shortcut: $ShortcutPath" -Tag "Check"
+Write-Log "Checking for desktop shortcut: $DesktopShortcutPath" -Tag "Check"
 try {
-    if (Test-Path -LiteralPath $ShortcutPath) {
-        Write-Log "Shortcut found. Deleting: $ShortcutPath" -Tag "Info"
-        Remove-Item -LiteralPath $ShortcutPath -Force
-        Write-Log "Shortcut deleted." -Tag "Success"
+    if (Test-Path -LiteralPath $DesktopShortcutPath) {
+        Write-Log "Shortcut found. Deleting: $DesktopShortcutPath" -Tag "Info"
+        Remove-Item -LiteralPath $DesktopShortcutPath -Force
+        Write-Log "Desktop shortcut deleted." -Tag "Success"
     } else {
-        Write-Log "Shortcut not found. Nothing to remove." -Tag "Info"
+        Write-Log "Desktop shortcut not found. Nothing to remove." -Tag "Info"
     }
 } catch {
-    Write-Log "Failed to remove shortcut. Error: $($_.Exception.Message)" -Tag "Error"
+    Write-Log "Failed to remove desktop shortcut. Error: $($_.Exception.Message)" -Tag "Error"
     Complete-Script -ExitCode 1
 }
 
-# 2) Remove RDP file
+# 2) Remove Start Menu Shortcut
+Write-Log "Checking for Start Menu shortcut: $StartMenuShortcutPath" -Tag "Check"
+try {
+    if (Test-Path -LiteralPath $StartMenuShortcutPath) {
+        Write-Log "Shortcut found. Deleting: $StartMenuShortcutPath" -Tag "Info"
+        Remove-Item -LiteralPath $StartMenuShortcutPath -Force
+        Write-Log "Start Menu shortcut deleted." -Tag "Success"
+    } else {
+        Write-Log "Start Menu shortcut not found. Nothing to remove." -Tag "Info"
+    }
+} catch {
+    Write-Log "Failed to remove Start Menu shortcut. Error: $($_.Exception.Message)" -Tag "Error"
+    Complete-Script -ExitCode 1
+}
+
+# 3) Remove RDP file
 Write-Log "Checking for RDP file: $TargetRdpPath" -Tag "Check"
 try {
     if (Test-Path -LiteralPath $TargetRdpPath) {
@@ -108,6 +131,20 @@ try {
     Complete-Script -ExitCode 1
 }
 
-# Done
+# 4) Remove Icon file
+Write-Log "Checking for icon file: $TargetIconPath" -Tag "Check"
+try {
+    if (Test-Path -LiteralPath $TargetIconPath) {
+        Write-Log "Icon file found. Deleting: $TargetIconPath" -Tag "Info"
+        Remove-Item -LiteralPath $TargetIconPath -Force
+        Write-Log "Icon file deleted." -Tag "Success"
+    } else {
+        Write-Log "Icon file not found. Nothing to remove." -Tag "Info"
+    }
+} catch {
+    Write-Log "Failed to remove icon file. Error: $($_.Exception.Message)" -Tag "Error"
+    Complete-Script -ExitCode 1
+}
+
 Write-Log "Uninstall cleanup complete." -Tag "Success"
 Complete-Script -ExitCode 0

@@ -3,7 +3,7 @@ $scriptStartTime = Get-Date
 
 # ---------------------------[ Script name ]---------------------------
 $applicationName = "Remote App - Microsoft Edge"
-$logFileName = "detection.log"
+$logFileName = "install.log"
 
 # ---------------------------[ Logging Setup ]---------------------------
 $log = $true
@@ -67,16 +67,22 @@ Write-Log "======== Script Started ========" -Tag "Start"
 Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | Application: $applicationName" -Tag "Info"
 
 # ---------------------------[ Variables ]---------------------------
-$LocalFolderName = "RemoteDesktopApps"
-$RdpFileName     = "MicrosoftEdge.rdp"
-$IconFileName    = "icon.ico"
-$ShortcutName    = "Microsoft Edge (RDP)"
+$LocalFolderName          = "RemoteDesktopApps"
+$RdpFileName              = "MicrosoftEdge.rdp"
+$IconFileName             = "MicrosoftEdge.ico"
+$DesktopShortcutName      = "Microsoft Edge (RDP)"
+$StartMenuShortcutName    = "Microsoft Edge (RDP)"
 
-$TargetFolderPath = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
-$TargetRdpPath    = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
-$TargetIconPath   = Join-Path -Path $TargetFolderPath -ChildPath $IconFileName
-$DesktopPath      = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath     = Join-Path -Path $DesktopPath -ChildPath ($ShortcutName + ".lnk")
+$TargetFolderPath         = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
+$TargetRdpPath            = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
+$TargetIconPath           = Join-Path -Path $TargetFolderPath -ChildPath $IconFileName
+
+$DesktopPath              = [Environment]::GetFolderPath("Desktop")
+$DesktopShortcutPath      = Join-Path -Path $DesktopPath -ChildPath ($DesktopShortcutName + ".lnk")
+
+$StartMenuRoot            = [Environment]::GetFolderPath("StartMenu")
+$StartMenuPrograms        = Join-Path -Path $StartMenuRoot -ChildPath "Programs"
+$StartMenuShortcutPath    = Join-Path -Path $StartMenuPrograms -ChildPath ($StartMenuShortcutName + ".lnk")
 
 # ---------------------------[ Detection ]---------------------------
 $failure = $false
@@ -100,11 +106,20 @@ if (Test-Path -LiteralPath $TargetIconPath) {
 }
 
 # 3) Check Desktop Shortcut
-Write-Log "Checking for Shortcut: $ShortcutPath" -Tag "Check"
-if (Test-Path -LiteralPath $ShortcutPath) {
-    Write-Log "Shortcut exists." -Tag "Success"
+Write-Log "Checking for Desktop shortcut: $DesktopShortcutPath" -Tag "Check"
+if (Test-Path -LiteralPath $DesktopShortcutPath) {
+    Write-Log "Desktop shortcut exists." -Tag "Success"
 } else {
-    Write-Log "Shortcut missing." -Tag "Error"
+    Write-Log "Desktop shortcut missing." -Tag "Error"
+    $failure = $true
+}
+
+# 4) Check Start Menu Shortcut
+Write-Log "Checking for Start Menu shortcut: $StartMenuShortcutPath" -Tag "Check"
+if (Test-Path -LiteralPath $StartMenuShortcutPath) {
+    Write-Log "Start Menu shortcut exists." -Tag "Success"
+} else {
+    Write-Log "Start Menu shortcut missing." -Tag "Error"
     $failure = $true
 }
 
@@ -115,5 +130,4 @@ if (-not $failure) {
 } else {
     Write-Log "One or more components missing. Detection failed." -Tag "Error"
     Complete-Script -ExitCode 1
-
 }
