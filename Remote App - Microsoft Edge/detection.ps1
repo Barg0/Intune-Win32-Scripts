@@ -3,7 +3,7 @@ $scriptStartTime = Get-Date
 
 # ---------------------------[ Script name ]---------------------------
 $applicationName = "Remote App - Microsoft Edge"
-$logFileName = "install.log"
+$logFileName = "detection.log"
 
 # ---------------------------[ Logging Setup ]---------------------------
 $log = $true
@@ -130,4 +130,5 @@ if (-not $failure) {
 } else {
     Write-Log "One or more components missing. Detection failed." -Tag "Error"
     Complete-Script -ExitCode 1
+
 }
