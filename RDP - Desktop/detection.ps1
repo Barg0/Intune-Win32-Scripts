@@ -103,6 +103,7 @@ if (Test-Path $destinationPath) {
     Write-Log "$($fileName) is present on the Desktop." -Tag "Success"
     Complete-Script -ExitCode 0
 } else {
-    Write-Output "$($fileName) is not present on the Desktop." -Tag "Error"
+    Write-Log "$($fileName) is not present on the Desktop." -Tag "Error"
     Complete-Script -ExitCode 1
+
 }
