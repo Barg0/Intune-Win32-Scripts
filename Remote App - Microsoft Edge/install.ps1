@@ -5,6 +5,25 @@ $scriptStartTime = Get-Date
 $applicationName = "Remote App - Microsoft Edge"
 $logFileName = "install.log"
 
+# ---------------------------[ Configurable Variables ]---------------------------
+$localFolderName = "RemoteDesktopApps"
+$fileName     = "MicrosoftEdge.rdp"
+$iconFileName = "MicrosoftEdge.ico"
+
+# Unified shortcut display name (no .lnk)
+$shortcutName    = "Microsoft Edge (RDP)"
+
+# Toggle: create Desktop Shortcut?
+$createDesktopShortcut = $true
+
+# Expected SHA256 hash of the main file
+# Leave empty to auto-derive from packaged source
+$fileExpectedSHA256 = "0FB0A957A8B997D0F7725243A56150975D456EDD5DB2721D39066662F0D71425"
+
+# Where the packaged files are relative to this script:
+$fileSourcePath  = Join-Path -Path $PSScriptRoot -ChildPath $fileName
+$iconSourcePath  = Join-Path -Path $PSScriptRoot -ChildPath $iconFileName
+
 # ---------------------------[ Logging Setup ]---------------------------
 $log = $true
 $enableLogFile = $true
@@ -63,34 +82,33 @@ function Complete-Script {
     exit $ExitCode
 }
 
+function Get-FileSHA256 {
+    param([string]$Path)
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            $hash = Get-FileHash -Path $Path -Algorithm SHA256
+            return $hash.Hash.ToUpperInvariant()
+        }
+    } catch {
+        Write-Log "Hashing failed for '$Path'. Error: $($_.Exception.Message)" -Tag "Error"
+    }
+    return $null
+}
+
 Write-Log "======== Script Started ========" -Tag "Start"
 Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | Application: $applicationName" -Tag "Info"
 
-# ---------------------------[ Variables You May Change ]---------------------------
-$LocalFolderName = "RemoteDesktopApps"
+# ---------------------------[ Folders ]---------------------------
+$targetFolderPath  = Join-Path -Path $env:LocalAppData -ChildPath $localFolderName
+$targetFilePath    = Join-Path -Path $targetFolderPath -ChildPath $fileName
+$targetIconPath    = Join-Path -Path $targetFolderPath -ChildPath $iconFileName
 
-$RdpFileName     = "MicrosoftEdge.rdp"
-$IconFileName    = "MicrosoftEdge.ico"
+$desktopPath       = [Environment]::GetFolderPath("Desktop")
+$desktopShortcut   = Join-Path -Path $desktopPath -ChildPath ($shortcutName + ".lnk")
 
-# Where the packaged files are relative to this script:
-$RdpSourcePath   = Join-Path -Path $PSScriptRoot -ChildPath $RdpFileName
-$IconSourcePath  = Join-Path -Path $PSScriptRoot -ChildPath $IconFileName
-
-# Shortcut display names (no .lnk in the name)
-$DesktopShortcutName   = "Microsoft Edge (RDP)"
-$StartMenuShortcutName = "Microsoft Edge (RDP)"
-
-# ---------------------------[ Derived Paths ]---------------------------
-$TargetFolderPath   = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
-$TargetRdpPath      = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
-$TargetIconPath     = Join-Path -Path $TargetFolderPath -ChildPath $IconFileName
-
-$DesktopPath        = [Environment]::GetFolderPath("Desktop")
-$DesktopShortcut    = Join-Path -Path $DesktopPath -ChildPath ($DesktopShortcutName + ".lnk")
-
-$StartMenuRoot      = [Environment]::GetFolderPath("StartMenu")         # e.g. C:\Users\<u>\AppData\Roaming\Microsoft\Windows\Start Menu
-$StartMenuPrograms  = Join-Path -Path $StartMenuRoot -ChildPath "Programs"
-$StartMenuShortcut  = Join-Path -Path $StartMenuPrograms -ChildPath ($StartMenuShortcutName + ".lnk")
+$startMenuRoot     = [Environment]::GetFolderPath("StartMenu")
+$startMenuPrograms = Join-Path -Path $startMenuRoot -ChildPath "Programs"
+$startMenuShortcut = Join-Path -Path $startMenuPrograms -ChildPath ($shortcutName + ".lnk")
 
 # ---------------------------[ Helper Functions ]---------------------------
 
@@ -140,6 +158,74 @@ function Copy-IfMissing {
     }
 }
 
+function Copy-WithHashCheck {
+    <#
+        Ensures the main file is present with SHA256 verification:
+        - If $fileExpectedSHA256 provided: verify SOURCE matches it (tamper check).
+        - If DEST exists and hash equals expected -> skip copy.
+        - Else copy/overwrite and verify.
+    #>
+    param(
+        [Parameter(Mandatory=$true)][string]$Source,
+        [Parameter(Mandatory=$true)][string]$Destination,
+        [Parameter()][AllowEmptyString()][string]$ExpectedSHA256
+    )
+
+    Write-Log "Preparing to ensure file with hash verification. Destination: $Destination" -Tag "Check"
+
+    if (-not (Test-Path -LiteralPath $Source)) {
+        Write-Log "Source file not found: '$Source'." -Tag "Error"
+        return $false
+    }
+
+    # Determine expected hash
+    $expected = if ([string]::IsNullOrWhiteSpace($ExpectedSHA256)) { Get-FileSHA256 -Path $Source } else { $ExpectedSHA256.ToUpperInvariant() }
+    if ($null -eq $expected) {
+        Write-Log "Could not determine expected hash from source '$Source'." -Tag "Error"
+        return $false
+    }
+
+    # Verify source integrity
+    $srcHash = Get-FileSHA256 -Path $Source
+    if ($srcHash -ne $expected) {
+        Write-Log "Source hash mismatch! Expected: $expected ; Actual: $srcHash" -Tag "Error"
+        return $false
+    } else {
+        Write-Log "Source file hash OK." -Tag "Success"
+    }
+
+    # If destination exists and already correct, skip copy
+    if (Test-Path -LiteralPath $Destination) {
+        $dstHash = Get-FileSHA256 -Path $Destination
+        if ($null -ne $dstHash -and $dstHash -eq $expected) {
+            Write-Log "Destination already up-to-date. Skipping copy." -Tag "Success"
+            return $true
+        } else {
+            Write-Log "Destination differs or hash unreadable. Will overwrite." -Tag "Info"
+        }
+    } else {
+        Write-Log "Destination not present. Will copy." -Tag "Info"
+    }
+
+    try {
+        $destDir = Split-Path -Path $Destination -Parent
+        if (-not (Test-Path -LiteralPath $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+        $postHash = Get-FileSHA256 -Path $Destination
+        if ($null -ne $postHash -and $postHash -eq $expected) {
+            Write-Log "File copied/updated successfully and verified." -Tag "Success"
+            return $true
+        } else {
+            Write-Log "Post-copy hash mismatch! Expected: $expected ; Actual: $postHash" -Tag "Error"
+            return $false
+        }
+    } catch {
+        Write-Log "Failed to copy file. Error: $($_.Exception.Message)" -Tag "Error"
+        return $false
+    }
+}
+
 function New-ShortcutIfMissing {
     param(
         [string]$ShortcutFilePath,
@@ -167,7 +253,7 @@ function New-ShortcutIfMissing {
             $shortcut.TargetPath      = $TargetPath
             $shortcut.WorkingDirectory= Split-Path -Path $TargetPath -Parent
             $shortcut.Description     = $Description
-            $shortcut.IconLocation    = $IconPath      # .ico file path (no index)
+            $shortcut.IconLocation    = $IconPath
             $shortcut.WindowStyle     = 1
             $shortcut.Save()
             Write-Log "Shortcut created." -Tag "Success"
@@ -184,34 +270,39 @@ function New-ShortcutIfMissing {
 # ---------------------------[ Main ]---------------------------
 
 # 1) Ensure target folder in %LocalAppData%
-if (-not (Test-Folder -Path $TargetFolderPath)) { Complete-Script -ExitCode 1 }
+if (-not (Test-Folder -Path $targetFolderPath)) { Complete-Script -ExitCode 1 }
 
-# 2) Copy RDP & Icon if missing
-if (-not (Copy-IfMissing -Source $RdpSourcePath  -Destination $TargetRdpPath  -ItemLabel "RDP file"))  { Complete-Script -ExitCode 1 }
-if (-not (Copy-IfMissing -Source $IconSourcePath -Destination $TargetIconPath -ItemLabel "Icon file")) { Complete-Script -ExitCode 1 }
+# 2) Copy main file with hash verification & copy icon if missing
+if (-not (Copy-WithHashCheck -Source $fileSourcePath  -Destination $targetFilePath  -ExpectedSHA256 $fileExpectedSHA256))  { Complete-Script -ExitCode 1 }
+if (-not (Copy-IfMissing     -Source $iconSourcePath  -Destination $targetIconPath  -ItemLabel "Icon file"))               { Complete-Script -ExitCode 1 }
 
-# 3) Ensure Start Menu\Programs exists (it should, but be safe)
-if (-not (Test-Folder -Path $StartMenuPrograms)) { Complete-Script -ExitCode 1 }
+# 3) Ensure Start Menu\Programs exists
+if (-not (Test-Folder -Path $startMenuPrograms)) { Complete-Script -ExitCode 1 }
 
-# 4) Create/ensure Desktop & Start Menu shortcuts (use the same .ico)
-if (-not (New-ShortcutIfMissing -ShortcutFilePath $DesktopShortcut   -TargetPath $TargetRdpPath -IconPath $TargetIconPath))  { Complete-Script -ExitCode 1 }
-if (-not (New-ShortcutIfMissing -ShortcutFilePath $StartMenuShortcut -TargetPath $TargetRdpPath -IconPath $TargetIconPath))  { Complete-Script -ExitCode 1 }
+# 4) Create/ensure Start Menu shortcut (always) & Desktop shortcut (conditional)
+if (-not (New-ShortcutIfMissing -ShortcutFilePath $startMenuShortcut -TargetPath $targetFilePath -IconPath $targetIconPath))  { Complete-Script -ExitCode 1 }
 
-# 5) Final validation: RDP + Icon + both Shortcuts must exist
-Write-Log "Validating final state (RDP, Icon, Desktop & Start Menu shortcuts)..." -Tag "Check"
+if ($createDesktopShortcut) {
+    if (-not (New-ShortcutIfMissing -ShortcutFilePath $desktopShortcut   -TargetPath $targetFilePath -IconPath $targetIconPath))  { Complete-Script -ExitCode 1 }
+} else {
+    Write-Log "Desktop shortcut creation disabled by configuration." -Tag "Info"
+}
 
-$rdpExists   = Test-Path -LiteralPath $TargetRdpPath
-$icoExists   = Test-Path -LiteralPath $TargetIconPath
-$deskExists  = Test-Path -LiteralPath $DesktopShortcut
-$menuExists  = Test-Path -LiteralPath $StartMenuShortcut
+# 5) Final validation
+Write-Log "Validating final state (file, icon, shortcuts)..." -Tag "Check"
 
-if (($true -eq $rdpExists) -and ($true -eq $icoExists) -and ($true -eq $deskExists) -and ($true -eq $menuExists)) {
-    Write-Log "Validation OK.`n RDP: '$TargetRdpPath'`n Icon: '$TargetIconPath'`n Desktop: '$DesktopShortcut'`n StartMenu: '$StartMenuShortcut'" -Tag "Success"
+$fileExists  = Test-Path -LiteralPath $targetFilePath
+$icoExists   = Test-Path -LiteralPath $targetIconPath
+$menuExists  = Test-Path -LiteralPath $startMenuShortcut
+$deskExists  = if ($createDesktopShortcut) { Test-Path -LiteralPath $desktopShortcut } else { $true }
+
+if ($fileExists -and $icoExists -and $menuExists -and $deskExists) {
+    Write-Log "Validation OK.`n File: '$targetFilePath'`n Icon: '$targetIconPath'`n StartMenu: '$startMenuShortcut'`n DesktopEnabled=$createDesktopShortcut" -Tag "Success"
     Complete-Script -ExitCode 0
 } else {
-    if ($true -ne $rdpExists)  { Write-Log "Missing file: $TargetRdpPath"       -Tag "Error" }
-    if ($true -ne $icoExists)  { Write-Log "Missing icon: $TargetIconPath"      -Tag "Error" }
-    if ($true -ne $deskExists) { Write-Log "Missing desktop shortcut: $DesktopShortcut" -Tag "Error" }
-    if ($true -ne $menuExists) { Write-Log "Missing start menu shortcut: $StartMenuShortcut" -Tag "Error" }
+    if (-not $fileExists)  { Write-Log "Missing file: $targetFilePath" -Tag "Error" }
+    if (-not $icoExists)   { Write-Log "Missing icon: $targetIconPath" -Tag "Error" }
+    if (-not $menuExists)  { Write-Log "Missing start menu shortcut: $startMenuShortcut" -Tag "Error" }
+    if ($createDesktopShortcut -and (-not $deskExists)) { Write-Log "Missing desktop shortcut: $desktopShortcut" -Tag "Error" }
     Complete-Script -ExitCode 1
 }

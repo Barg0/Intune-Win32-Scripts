@@ -5,6 +5,20 @@ $scriptStartTime = Get-Date
 $applicationName = "Remote App - Microsoft Edge"
 $logFileName = "detection.log"
 
+# ---------------------------[ Configurable Variables ]---------------------------
+$localFolderName       = "RemoteDesktopApps"
+$fileName              = "MicrosoftEdge.rdp"
+$iconFileName          = "MicrosoftEdge.ico"
+
+# unified shortcut display name (no .lnk)
+$shortcutName          = "Microsoft Edge (RDP)"
+
+# toggle for desktop shortcut
+$createDesktopShortcut = $true
+
+# optional expected file hash (if empty, hash check is skipped here)
+$fileExpectedSHA256    = "0FB0A957A8B997D0F7725243A56150975D456EDD5DB2721D39066662F0D71425"
+
 # ---------------------------[ Logging Setup ]---------------------------
 $log = $true
 $enableLogFile = $true
@@ -63,60 +77,86 @@ function Complete-Script {
     exit $ExitCode
 }
 
+function Get-FileSHA256 {
+    param([string]$Path)
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            $hash = Get-FileHash -Path $Path -Algorithm SHA256
+            return $hash.Hash.ToUpperInvariant()
+        }
+    } catch {
+        Write-Log "Hashing failed for '$Path'. Error: $($_.Exception.Message)" -Tag "Error"
+    }
+    return $null
+}
+
 Write-Log "======== Script Started ========" -Tag "Start"
 Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | Application: $applicationName" -Tag "Info"
 
-# ---------------------------[ Variables ]---------------------------
-$LocalFolderName          = "RemoteDesktopApps"
-$RdpFileName              = "MicrosoftEdge.rdp"
-$IconFileName             = "MicrosoftEdge.ico"
-$DesktopShortcutName      = "Microsoft Edge (RDP)"
-$StartMenuShortcutName    = "Microsoft Edge (RDP)"
+# ---------------------------[ Folders ]---------------------------
+$targetFolderPath      = Join-Path -Path $env:LocalAppData -ChildPath $localFolderName
+$targetFilePath        = Join-Path -Path $targetFolderPath -ChildPath $fileName
+$targetIconPath        = Join-Path -Path $targetFolderPath -ChildPath $iconFileName
 
-$TargetFolderPath         = Join-Path -Path $env:LocalAppData -ChildPath $LocalFolderName
-$TargetRdpPath            = Join-Path -Path $TargetFolderPath -ChildPath $RdpFileName
-$TargetIconPath           = Join-Path -Path $TargetFolderPath -ChildPath $IconFileName
+$desktopPath           = [Environment]::GetFolderPath("Desktop")
+$desktopShortcutPath   = Join-Path -Path $desktopPath -ChildPath ($shortcutName + ".lnk")
 
-$DesktopPath              = [Environment]::GetFolderPath("Desktop")
-$DesktopShortcutPath      = Join-Path -Path $DesktopPath -ChildPath ($DesktopShortcutName + ".lnk")
-
-$StartMenuRoot            = [Environment]::GetFolderPath("StartMenu")
-$StartMenuPrograms        = Join-Path -Path $StartMenuRoot -ChildPath "Programs"
-$StartMenuShortcutPath    = Join-Path -Path $StartMenuPrograms -ChildPath ($StartMenuShortcutName + ".lnk")
+$startMenuRoot         = [Environment]::GetFolderPath("StartMenu")
+$startMenuPrograms     = Join-Path -Path $startMenuRoot -ChildPath "Programs"
+$startMenuShortcutPath = Join-Path -Path $startMenuPrograms -ChildPath ($shortcutName + ".lnk")
 
 # ---------------------------[ Detection ]---------------------------
 $failure = $false
 
-# 1) Check RDP file
-Write-Log "Checking for RDP file: $TargetRdpPath" -Tag "Check"
-if (Test-Path -LiteralPath $TargetRdpPath) {
-    Write-Log "RDP file exists." -Tag "Success"
+# 1) Check main file
+Write-Log "Checking for file: $targetFilePath" -Tag "Check"
+if (Test-Path -LiteralPath $targetFilePath) {
+    Write-Log "File exists." -Tag "Success"
+
+    if (-not [string]::IsNullOrWhiteSpace($fileExpectedSHA256)) {
+        $installedHash = Get-FileSHA256 -Path $targetFilePath
+        if ($null -eq $installedHash) {
+            Write-Log "Could not compute installed file hash." -Tag "Error"
+            $failure = $true
+        } elseif ($installedHash -ne $fileExpectedSHA256.ToUpperInvariant()) {
+            Write-Log "Installed file hash mismatch. Expected: $($fileExpectedSHA256.ToUpperInvariant()) ; Actual: $installedHash" -Tag "Error"
+            $failure = $true
+        } else {
+            Write-Log "Installed file hash OK." -Tag "Success"
+        }
+    } else {
+        Write-Log "No expected hash provided; skipping hash validation." -Tag "Info"
+    }
 } else {
-    Write-Log "RDP file missing." -Tag "Error"
+    Write-Log "File missing." -Tag "Error"
     $failure = $true
 }
 
 # 2) Check Icon file
-Write-Log "Checking for Icon file: $TargetIconPath" -Tag "Check"
-if (Test-Path -LiteralPath $TargetIconPath) {
+Write-Log "Checking for Icon file: $targetIconPath" -Tag "Check"
+if (Test-Path -LiteralPath $targetIconPath) {
     Write-Log "Icon file exists." -Tag "Success"
 } else {
     Write-Log "Icon file missing." -Tag "Error"
     $failure = $true
 }
 
-# 3) Check Desktop Shortcut
-Write-Log "Checking for Desktop shortcut: $DesktopShortcutPath" -Tag "Check"
-if (Test-Path -LiteralPath $DesktopShortcutPath) {
-    Write-Log "Desktop shortcut exists." -Tag "Success"
+# 3) Check Desktop Shortcut (conditional)
+if ($createDesktopShortcut) {
+    Write-Log "Checking for Desktop shortcut: $desktopShortcutPath" -Tag "Check"
+    if (Test-Path -LiteralPath $desktopShortcutPath) {
+        Write-Log "Desktop shortcut exists." -Tag "Success"
+    } else {
+        Write-Log "Desktop shortcut missing (toggle enabled)." -Tag "Error"
+        $failure = $true
+    }
 } else {
-    Write-Log "Desktop shortcut missing." -Tag "Error"
-    $failure = $true
+    Write-Log "Desktop shortcut disabled by configuration; skipping check." -Tag "Info"
 }
 
-# 4) Check Start Menu Shortcut
-Write-Log "Checking for Start Menu shortcut: $StartMenuShortcutPath" -Tag "Check"
-if (Test-Path -LiteralPath $StartMenuShortcutPath) {
+# 4) Check Start Menu Shortcut (always)
+Write-Log "Checking for Start Menu shortcut: $startMenuShortcutPath" -Tag "Check"
+if (Test-Path -LiteralPath $startMenuShortcutPath) {
     Write-Log "Start Menu shortcut exists." -Tag "Success"
 } else {
     Write-Log "Start Menu shortcut missing." -Tag "Error"
@@ -130,5 +170,4 @@ if (-not $failure) {
 } else {
     Write-Log "One or more components missing. Detection failed." -Tag "Error"
     Complete-Script -ExitCode 1
-
 }
