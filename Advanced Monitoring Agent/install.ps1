@@ -13,8 +13,8 @@ $logFileName = "install.log"
 
 # ---------------------------[ Installer ]---------------------------
 
-$installerName = "setup.EXE"
-$installParameter = ''
+$installerName = "SETUP.EXE"
+# $installParameter = ''
 $installerPath = Join-Path -Path $PSScriptRoot -ChildPath $installerName
 
 # ---------------------------[ Logging Setup ]---------------------------
@@ -105,8 +105,8 @@ if (-not (Test-Path -Path $installerPath)) {
 Write-Log "Installer found. Starting silent install..." -Tag "Info"
 
 try {
-    $arguments = $installParameter
-    $process = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru -NoNewWindow
+    # $arguments = $installParameter
+    $process = Start-Process -FilePath $installerPath -Wait -PassThru -NoNewWindow
     Write-Log "Installer exited with code: $($process.ExitCode)" -Tag "Info"
 
     if ($process.ExitCode -eq 0) {

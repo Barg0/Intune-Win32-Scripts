@@ -1,3 +1,8 @@
+# ---------------------------[ Script Start Timestamp ]---------------------------
+
+# Capture start time to log script duration
+$scriptStartTime = Get-Date
+
 # ---------------------------[ Software Values ]---------------------------
 
 $softwareName = "Advanced Monitoring Agent"

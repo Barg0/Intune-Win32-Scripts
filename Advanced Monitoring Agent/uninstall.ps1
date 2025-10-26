@@ -1,7 +1,7 @@
-# ---------------------------[ Script Metadata ]---------------------------
+# ---------------------------[ Script Start Timestamp ]---------------------------
 
-# Script version:   2025-07-07
-# Script author:    Barg0
+# Capture start time to log script duration
+$scriptStartTime = Get-Date
 
 # ---------------------------[ Parameter ]---------------------------
 
