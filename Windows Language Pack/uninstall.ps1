@@ -144,25 +144,36 @@ function Get-LoadedUserSids {
     param()
 
     $sids = @()
-    Write-Log "Getting loaded user SIDs from HKEY_USERS" -Tag "Get"
 
+    Write-Log "Getting loaded user SIDs from HKEY_USERS" -Tag "Get"
     try {
         foreach ($item in Get-ChildItem -Path "Registry::HKEY_USERS" -ErrorAction Stop) {
             $sid = $item.PSChildName
 
-            # Only real user profile SIDs, no .DEFAULT, services, or *_Classes
-            if ($sid -match "^S-1-5-21-" -and $sid -notlike "*_Classes") {
+            # Skip default hive and *_Classes hives
+            if ($sid -eq ".DEFAULT") {
+                Write-Log "Skipping .DEFAULT hive under HKEY_USERS" -Tag "Debug"
+                continue
+            }
+            if ($sid -like "*_Classes") {
+                Write-Log "Skipping SID classes hive '$sid' under HKEY_USERS" -Tag "Debug"
+                continue
+            }
+
+            # Match classic (S-1-5-21-...) and Entra ID (S-1-12-1-...) user SIDs
+            if ($sid -match '^S-1-5-21-' -or $sid -match '^S-1-12-1-') {
                 $sids += $sid
                 Write-Log "Discovered loaded user SID '$sid'" -Tag "Debug"
             }
             else {
-                Write-Log "Skipping non-user or _Classes SID '$sid' under HKEY_USERS" -Tag "Debug"
+                Write-Log "Skipping well-known / non-user SID '$sid' under HKEY_USERS" -Tag "Debug"
             }
         }
 
         if ($sids.Count -gt 0) {
             Write-Log "Loaded user SIDs discovered: $($sids -join ', ')" -Tag "Info"
-        } else {
+        }
+        else {
             Write-Log "No loaded user SIDs found under HKEY_USERS" -Tag "Info"
         }
     }
