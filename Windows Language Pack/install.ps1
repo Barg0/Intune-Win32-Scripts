@@ -154,12 +154,24 @@ function Get-LoadedUserSids {
     try {
         foreach ($item in Get-ChildItem -Path "Registry::HKEY_USERS" -ErrorAction Stop) {
             $sid = $item.PSChildName
-            if ($sid -match "^S-1-5-21-") {
+
+            # Skip default hive and *_Classes hives
+            if ($sid -eq ".DEFAULT") {
+                Write-Log "Skipping .DEFAULT hive under HKEY_USERS" -Tag "Debug"
+                continue
+            }
+            if ($sid -like "*_Classes") {
+                Write-Log "Skipping SID classes hive '$sid' under HKEY_USERS" -Tag "Debug"
+                continue
+            }
+
+            # Match classic (S-1-5-21-...) and Entra ID (S-1-12-1-...) user SIDs
+            if ($sid -match '^S-1-5-21-' -or $sid -match '^S-1-12-1-') {
                 $sids += $sid
                 Write-Log "Discovered loaded user SID '$sid'" -Tag "Debug"
             }
             else {
-                Write-Log "Skipping non-user SID '$sid' under HKEY_USERS" -Tag "Debug"
+                Write-Log "Skipping well-known / non-user SID '$sid' under HKEY_USERS" -Tag "Debug"
             }
         }
 
