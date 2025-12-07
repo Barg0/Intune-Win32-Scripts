@@ -12,7 +12,7 @@ This repository provides a **reusable, configurable, and standardized PowerShell
 ✅ Unified **logging**
 ✅ Registry **or** packaged uninstaller support
 
-You can deploy **any Win32 application** by modifying just a few variables at the top of each 📜 script — no heavy rewrites needed.
+You can deploy **any Win32 application** by modifying just a few variables at the top of each 📜 script.
 
 ---
 
@@ -211,7 +211,7 @@ $registrySearchPaths = @(
 
 ### 🛠 Required Tool
 
-Use the official **Microsoft-Win32-Content-Prep-Tool** to create `.intunewin` packages:
+Use the official **Microsoft-Win32-Content-Prep-Tool** to create `.intunewin` packages: 
 🔗 [https://github.com/Microsoft/Microsoft-Win32-Content-Prep-Tool](https://github.com/Microsoft/Microsoft-Win32-Content-Prep-Tool)
 
 ### 📁 Example Source Layout
