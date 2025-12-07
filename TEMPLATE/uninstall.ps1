@@ -177,7 +177,7 @@ if ($usePackagedUninstaller) {
         }
 
         Write-Log "Packaged uninstall process ID: $($process.Id)" -Tag "Debug"
-        Write-Log "Packaged uninstall exit code: $($process.ExitCode)" -Tag "Get"
+        Write-Log "Packaged uninstall exit code: $($process.ExitCode)" -Tag "Info"
 
         if ($process.ExitCode -eq 0) {
             Write-Log "$applicationName uninstalled successfully using packaged installer." -Tag "Success"
@@ -185,7 +185,7 @@ if ($usePackagedUninstaller) {
         }
         else {
             Write-Log "Packaged uninstall returned non-zero exit code: $($process.ExitCode)" -Tag "Error"
-            Stop-Script -ExitCode $process.ExitCode
+            Stop-Script -ExitCode 1
         }
     }
     catch {
