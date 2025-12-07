@@ -355,15 +355,12 @@ All scripts share the same logging behavior and target the same 📁 log directo
 
 ### 📄 Script Log Files
 
-> 💡 **Tip**
->
-> The 📄 log files for all three scripts (`install.ps1`, `uninstall.ps1`, `detection.ps1`) are saved at:
+> [!TIP]
+> The **📄 Log files** for all three scripts are saved at:
 > `C:\ProgramData\IntuneLogs\Applications\$applicationName\`
 >
-> Structure:
->
-> ```text
-> C:\
+> ```
+> C:  
 > ├─📁 ProgramData
 > │  └─📁 IntuneLogs
 > │     └─📁 Applications
@@ -372,9 +369,9 @@ All scripts share the same logging behavior and target the same 📁 log directo
 > │           ├─📄 install.log
 > │           └─📄 uninstall.log
 > ```
+> To enable log collection from this custom directory using the **Collect diagnostics** feature in Intune, deploy the following platform script:
 >
-> To enable **log collection** from this custom directory using the **Collect diagnostics** feature in Intune, deploy this platform script:
-> **📜 Diagnostics - Custom Log File Directory**
+> [**📜 Diagnostics - Custom Log File Directory**](https://github.com/Barg0/Intune-Platform-Scripts/tree/main/Diagnostics%20-%20Custom%20Log%20File%20Directory)
 
 ### 📁 Script Logs (per app)
 
