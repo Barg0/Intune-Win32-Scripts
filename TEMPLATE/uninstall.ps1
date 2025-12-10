@@ -264,7 +264,6 @@ foreach ($registryPath in $registrySearchPaths) {
                 $process = Start-Process -FilePath "cmd.exe" `
                                          -ArgumentList "/c `"$uninstallString`"" `
                                          -Wait `
-                                         -PassThru `
                                          -NoNewWindow
 
                 if ($null -eq $process) {
