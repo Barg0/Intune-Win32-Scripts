@@ -161,7 +161,7 @@ Write-Log "Starting installation for '$applicationName'." -Tag "Run"
 try {
     Write-Log "Launching process: '$filePath' with arguments: $argumentList" -Tag "Debug"
 
-    $process = Start-Process -FilePath $filePath -ArgumentList $argumentList -Wait -PassThru -NoNewWindow
+    $process = Start-Process -FilePath $filePath -ArgumentList $argumentList -Wait -NoNewWindow
 
     if ($null -eq $process) {
         Write-Log "Start-Process did not return a process object. Installation result is unknown." -Tag "Error"
