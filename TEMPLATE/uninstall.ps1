@@ -1,14 +1,14 @@
-# ===========================[ Script Start Timestamp ]====================
+# ===========================[ Script Start Timestamp ]===========================
 $scriptStartTime = Get-Date
 
-# ===========================[ Configuration ]=============================
+# ===========================[ Configuration ]===========================
 
-# Name of application (used for logging / context only when using packaged uninstaller)
+# Name of application (used for logging, registry lookup, and post-uninstall validation)
 $applicationName              = "Global Secure Access Client"
 
 # Use the EXE/MSI bundled inside the IntuneWin package for uninstall?
-# $true  = use packaged installer ONLY (no registry lookup at all)
-# $false = use registry UninstallString detection logic
+# $true  = use packaged installer for uninstall (registry still used for validation)
+# $false = use registry UninstallString detection to find and execute uninstaller
 $usePackagedUninstaller       = $true
 
 # Packaged uninstaller configuration (used only when $usePackagedUninstaller = $true)
@@ -21,13 +21,13 @@ $uninstallerArgumentsExe      = "/uninstall /quiet /norestart"     # For non-MSI
 $uninstallerArgumentsMsi      = "/qn"                              # For MSI uninstall (msiexec /x ...)
 
 # Registry locations to search for uninstall entries
-# Used only when $usePackagedUninstaller = $false
+# Used for: registry-based uninstall mode AND post-uninstall validation in both modes
 $registrySearchPaths = @(
     "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
-# ===========================[ Logging Configuration ]=====================
+# ===========================[ Logging Configuration ]===========================
 $scriptName       = $applicationName
 $logFileName      = "uninstall.log"
 
@@ -43,10 +43,16 @@ $logFile          = "$logFileDirectory\$logFileName"
 
 # Ensure log directory exists
 if ($enableLogFile -and -not (Test-Path -Path $logFileDirectory)) {
-    New-Item -ItemType Directory -Path $logFileDirectory -Force | Out-Null
+    try {
+        $null = New-Item -ItemType Directory -Path $logFileDirectory -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Failed to create log directory '$logFileDirectory': $($_.Exception.Message)"
+        # Continue execution - logging will fail but script should continue
+    }
 }
 
-# ===========================[ Logging Function ]==========================
+# ===========================[ Logging Function ]===========================
 function Write-Log {
     [CmdletBinding()]
     param (
@@ -86,7 +92,12 @@ function Write-Log {
     $logMessage = "$timestamp [  $rawTag ] $message"
 
     if ($enableLogFile) {
-        Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
+        try {
+            Add-Content -Path $logFile -Value $logMessage -Encoding UTF8 -ErrorAction Stop
+        }
+        catch {
+            # Logging must never block script execution - silently fail if log file is locked
+        }
     }
 
     Write-Host "$timestamp " -NoNewline
@@ -96,7 +107,7 @@ function Write-Log {
     Write-Host "$message"
 }
 
-# ===========================[ Exit Function ]=============================
+# ===========================[ Exit Function ]===============================
 function Stop-Script {
     [CmdletBinding()]
     param(
@@ -113,18 +124,445 @@ function Stop-Script {
     exit $exitCode
 }
 
+# ===========================[ Registry Check Function ]===============================
+function Test-ApplicationInRegistry {
+    [CmdletBinding()]
+    param(
+        [string]$ApplicationName,
+        [string[]]$RegistryPaths,
+        [switch]$SuppressLogging
+    )
+
+    if (-not $SuppressLogging) {
+        Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+    }
+
+    foreach ($registryPath in $RegistryPaths) {
+        if (-not (Test-Path -Path $registryPath)) {
+            Write-Log "Registry path '$registryPath' does not exist, skipping." -Tag "Debug"
+            continue
+        }
+
+        $subkeys = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
+        if ($null -eq $subkeys) {
+            continue
+        }
+
+        foreach ($subkey in $subkeys) {
+            $properties = Get-ItemProperty -Path $subkey.PSPath -ErrorAction SilentlyContinue
+            if ($null -eq $properties) { continue }
+
+            $displayName = $properties.DisplayName
+
+            if ($displayName -eq $ApplicationName) {
+                Write-Log "Application '$ApplicationName' found in registry at: $($subkey.PSPath)" -Tag "Debug"
+                return $true
+            }
+        }
+    }
+
+    Write-Log "Application '$ApplicationName' not found in registry." -Tag "Debug"
+    return $false
+}
+
+# ===========================[ Parse UninstallString Function ]===============================
+function Parse-UninstallString {
+    [CmdletBinding()]
+    param(
+        [string]$UninstallString
+    )
+
+    # Remove leading/trailing whitespace
+    $UninstallString = $UninstallString.Trim()
+
+    # Validate input
+    if ([string]::IsNullOrWhiteSpace($UninstallString)) {
+        Write-Log "UninstallString is empty or whitespace." -Tag "Error"
+        return @{
+            FilePath  = ""
+            Arguments = ""
+        }
+    }
+
+    # Handle quoted executable paths (e.g., "C:\Program Files\App\uninstall.exe" /silent)
+    if ($UninstallString -match '^"([^"]+)"\s*(.*)$') {
+        $filePath = $matches[1]
+        $arguments = $matches[2].Trim()
+    }
+    # Handle unquoted executable paths (e.g., C:\App\uninstall.exe /silent)
+    # Note: This regex won't handle paths with spaces that aren't quoted - fallback will handle those
+    elseif ($UninstallString -match '^([^\s"]+\.(exe|msi|bat|cmd))(?:\s+(.*))?$') {
+        $filePath = $matches[1]
+        $arguments = if ($matches[3]) { $matches[3].Trim() } else { "" }
+    }
+    else {
+        # Fallback: split on first space (may not handle paths with spaces correctly)
+        $parts = $UninstallString -split '\s+', 2
+        $filePath = $parts[0]
+        $arguments = if ($parts.Count -gt 1) { $parts[1] } else { "" }
+    }
+
+    # Validate parsed filePath
+    if ([string]::IsNullOrWhiteSpace($filePath)) {
+        Write-Log "Failed to parse executable path from UninstallString: $UninstallString" -Tag "Error"
+    }
+
+    return @{
+        FilePath  = $filePath
+        Arguments = $arguments
+    }
+}
+
+# ===========================[ Execute Uninstall Process Function ]===============================
+function Invoke-UninstallProcess {
+    [CmdletBinding()]
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [string]$Context = "Uninstall"
+    )
+
+    # Validate FilePath
+    if ([string]::IsNullOrWhiteSpace($FilePath)) {
+        Write-Log "FilePath is empty or null. Cannot start $Context process." -Tag "Error"
+        return $null
+    }
+
+    Write-Log "Starting $Context process: '$FilePath' $ArgumentList" -Tag "Run"
+
+    # Use -PassThru to capture process object and exit code
+    # This is CRITICAL in SYSTEM context where we can't see the process interactively
+    # If ArgumentList is empty, pass $null instead of empty string
+    $processParams = @{
+        FilePath     = $FilePath
+        Wait         = $true
+        PassThru     = $true
+        NoNewWindow  = $true
+    }
+    
+    if (-not [string]::IsNullOrWhiteSpace($ArgumentList)) {
+        $processParams['ArgumentList'] = $ArgumentList
+    }
+    
+    $process = Start-Process @processParams
+
+    if ($null -eq $process) {
+        Write-Log "Start-Process did not return a process object. $Context result unknown." -Tag "Error"
+        return $null
+    }
+
+    Write-Log "$Context process ID: $($process.Id)" -Tag "Debug"
+    Write-Log "$Context exit code: $($process.ExitCode)" -Tag "Info"
+
+    return $process
+}
+
+# ===========================[ Post-Uninstall Validation Function ]===============================
+function Test-PostUninstallValidation {
+    [CmdletBinding()]
+    param(
+        [string]$ApplicationName,
+        [string[]]$RegistryPaths,
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 5
+    )
+
+    Write-Log "Performing post-uninstall validation..." -Tag "Info"
+
+    # Check registry with retries (some uninstallers take time to remove registry keys after process exit)
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        if ($attempt -gt 1) {
+            Write-Log "Validation check $attempt of $MaxRetries after $RetryDelay seconds..." -Tag "Info"
+            Start-Sleep -Seconds $RetryDelay
+        }
+
+        $applicationRemoved = -not (Test-ApplicationInRegistry -ApplicationName $ApplicationName -RegistryPaths $RegistryPaths -SuppressLogging)
+
+        if ($applicationRemoved) {
+            Write-Log "Post-uninstall validation successful: Application removed from registry." -Tag "Success"
+            return $true
+        }
+        else {
+            Write-Log "Application still present in registry (validation check $attempt of $MaxRetries)." -Tag "Info"
+        }
+    }
+
+    Write-Log "Post-uninstall validation failed: Application still present in registry after $MaxRetries validation attempts." -Tag "Error"
+    return $false
+}
+
+# ===========================[ Detect MSI Function ]===============================
+function Test-IsMsiInstaller {
+    [CmdletBinding()]
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [string]$UninstallString
+    )
+
+    # Check if msiexec.exe is in the path or arguments
+    # Use word boundaries or specific patterns to avoid false positives
+    
+    # Check FilePath for msiexec.exe
+    if ($FilePath -and $FilePath -match "msiexec\.exe") {
+        return $true
+    }
+    
+    # Check ArgumentList for MSI uninstall argument (/x) - must be at start or after space/slash
+    if ($ArgumentList -and $ArgumentList -match '(?:^|\s|/)x(?:\s|$|/)') {
+        return $true
+    }
+    
+    # Check UninstallString for msiexec.exe pattern
+    if ($UninstallString -and $UninstallString -match '(?:^|"|\\|\s)msiexec\.exe(?:\s|"|/|$)') {
+        return $true
+    }
+    
+    return $false
+}
+
+# ===========================[ Find Application in Registry Function ]===============================
+function Get-ApplicationUninstallString {
+    [CmdletBinding()]
+    param(
+        [string]$ApplicationName,
+        [string[]]$RegistryPaths
+    )
+
+    Write-Log "Searching registry for application '$ApplicationName'..." -Tag "Get"
+
+    foreach ($registryPath in $RegistryPaths) {
+        if (-not (Test-Path -Path $registryPath)) {
+            Write-Log "Registry path '$registryPath' does not exist, skipping." -Tag "Debug"
+            continue
+        }
+
+        Write-Log "Searching in registry path: $registryPath" -Tag "Get"
+
+        $subkeys = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
+        if ($null -eq $subkeys) {
+            Write-Log "No subkeys found in $registryPath" -Tag "Debug"
+            continue
+        }
+
+        foreach ($subkey in $subkeys) {
+            $properties = Get-ItemProperty -Path $subkey.PSPath -ErrorAction SilentlyContinue
+            if ($null -eq $properties) { continue }
+
+            $displayName = $properties.DisplayName
+            $uninstallString = $properties.UninstallString
+
+            if ($displayName) {
+                Write-Log "Found installed product: '$displayName'" -Tag "Debug"
+            }
+
+            if ($displayName -eq $ApplicationName) {
+                Write-Log "Found application '$displayName'" -Tag "Success"
+                
+                if ([string]::IsNullOrWhiteSpace($uninstallString)) {
+                    Write-Log "UninstallString missing or empty for '$ApplicationName'." -Tag "Error"
+                    return $null
+                }
+
+                return $uninstallString
+            }
+        }
+    }
+
+    return $null
+}
+
+# ===========================[ Process UninstallString Function ]===============================
+function Get-ProcessedUninstallerCommand {
+    [CmdletBinding()]
+    param(
+        [string]$UninstallString
+    )
+
+    # Validate input
+    if ([string]::IsNullOrWhiteSpace($UninstallString)) {
+        Write-Log "UninstallString is empty or whitespace." -Tag "Error"
+        return $null
+    }
+
+    Write-Log "Original uninstall string: $UninstallString" -Tag "Debug"
+
+    $uninstallString = $uninstallString.Trim()
+
+    # Detect MSI and append appropriate arguments
+    $isMsi = Test-IsMsiInstaller -UninstallString $uninstallString
+
+    if ($isMsi) {
+        Write-Log "MSI-based uninstaller detected. Ensuring MSI uninstall arguments are present." -Tag "Info"
+
+        # Check for any quiet flag: /qn, /quiet, /q, /norestart
+        if ($uninstallString -notmatch '/(?:qn|quiet|q|norestart)(?:\s|$|/)') {
+            $uninstallString += " $uninstallerArgumentsMsi"
+            Write-Log "Appended MSI uninstall arguments: $uninstallerArgumentsMsi" -Tag "Debug"
+        }
+        else {
+            Write-Log "MSI uninstall string already contains quiet flag." -Tag "Debug"
+        }
+    }
+    else {
+        Write-Log "Non-MSI uninstaller detected. Appending EXE uninstall arguments: $uninstallerArgumentsExe" -Tag "Info"
+        $uninstallString += " $uninstallerArgumentsExe"
+    }
+
+    Write-Log "Final uninstall string: $uninstallString" -Tag "Debug"
+
+    # Parse the UninstallString to extract executable and arguments
+    $parsedUninstall = Parse-UninstallString -UninstallString $uninstallString
+    $uninstallerPath = $parsedUninstall.FilePath
+    $uninstallerArgs = $parsedUninstall.Arguments
+
+    # Validate parsed FilePath
+    if ([string]::IsNullOrWhiteSpace($uninstallerPath)) {
+        Write-Log "Failed to parse executable path from UninstallString." -Tag "Error"
+        return $null
+    }
+
+    Write-Log "Parsed uninstaller path: $uninstallerPath" -Tag "Debug"
+    Write-Log "Parsed uninstaller arguments: $uninstallerArgs" -Tag "Debug"
+
+    # Expand environment variables in path (e.g., %ProgramFiles% -> C:\Program Files)
+    $uninstallerPath = [System.Environment]::ExpandEnvironmentVariables($uninstallerPath)
+
+    # Validate the uninstaller executable exists
+    if (-not (Test-Path -Path $uninstallerPath)) {
+        Write-Log "Uninstaller executable not found at path: $uninstallerPath" -Tag "Error"
+        return $null
+    }
+
+    # Determine if this is an MSI uninstaller (for exit code handling)
+    $isMsiFinal = Test-IsMsiInstaller -FilePath $uninstallerPath -ArgumentList $uninstallerArgs
+
+    return @{
+        FilePath  = $uninstallerPath
+        Arguments = $uninstallerArgs
+        IsMsi     = $isMsiFinal
+    }
+}
+
+# ===========================[ Execute Uninstall with Validation Function ]===============================
+function Invoke-UninstallWithValidation {
+    [CmdletBinding()]
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [bool]$IsMsi,
+        [string]$ApplicationName,
+        [string[]]$RegistryPaths,
+        [string]$Context = "Uninstall"
+    )
+
+    try {
+        $process = Invoke-UninstallProcess -FilePath $FilePath `
+                                           -ArgumentList $ArgumentList `
+                                           -Context $Context
+
+        if ($null -eq $process) {
+            return @{ Success = $false; ExitCode = 1 }
+        }
+
+        # Check if exit code indicates we should proceed with validation
+        # Exit codes are passed through to Stop-Script for Intune to interpret
+        $isSuccessCode = $process.ExitCode -eq 0 -or ($IsMsi -and $process.ExitCode -eq 3010)
+
+        if ($isSuccessCode) {
+            if ($process.ExitCode -eq 3010) {
+                Write-Log "Uninstall completed but reboot is required (exit code 3010)." -Tag "Info"
+            }
+            else {
+                Write-Log "$ApplicationName uninstall process completed with exit code: $($process.ExitCode)" -Tag "Success"
+            }
+
+            $validationSuccess = Test-PostUninstallValidation -ApplicationName $ApplicationName `
+                                                               -RegistryPaths $RegistryPaths
+
+            if ($validationSuccess) {
+                # Pass the original exit code to Stop-Script (Intune will interpret it)
+                return @{ Success = $true; ExitCode = $process.ExitCode }
+            }
+            else {
+                Write-Log "Uninstall process completed but validation failed." -Tag "Error"
+                return @{ Success = $false; ExitCode = 1 }
+            }
+        }
+        else {
+            Write-Log "$Context returned exit code: $($process.ExitCode)" -Tag "Error"
+            # Pass the actual exit code to Stop-Script (Intune will interpret it)
+            return @{ Success = $false; ExitCode = $process.ExitCode }
+        }
+    }
+    catch {
+        Write-Log "$Context failed with exception: $($_.Exception.Message)" -Tag "Error"
+        Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+        return @{ Success = $false; ExitCode = 1 }
+    }
+}
+
+# ===========================[ Prepare Packaged Uninstaller Function ]===============================
+function Get-PackagedUninstallerCommand {
+    [CmdletBinding()]
+    param(
+        [string]$InstallerPath
+    )
+
+    $installerExtension = [System.IO.Path]::GetExtension($InstallerPath)
+    Write-Log "Detected packaged installer extension: '$installerExtension'" -Tag "Debug"
+
+    switch ($installerExtension.ToLowerInvariant()) {
+        ".msi" {
+            Write-Log "Packaged installer identified as MSI. Preparing msiexec uninstall command line." -Tag "Info"
+            $filePath = "msiexec.exe"
+            # Escape quotes in path if present, then quote the entire path
+            $escapedPath = $InstallerPath -replace '"', '""'
+            $argumentList = "/x `"$escapedPath`" $uninstallerArgumentsMsi"
+            $isMsi = $true
+        }
+        ".exe" {
+            Write-Log "Packaged installer identified as EXE. Using EXE uninstall arguments." -Tag "Info"
+            $filePath = $InstallerPath
+            $argumentList = $uninstallerArgumentsExe
+            $isMsi = $false
+        }
+        default {
+            Write-Log "Unsupported packaged installer extension '$installerExtension'. Only .exe and .msi are supported." -Tag "Error"
+            return $null
+        }
+    }
+
+    Write-Log "Uninstall file: $filePath" -Tag "Debug"
+    Write-Log "Uninstall arguments: $argumentList" -Tag "Debug"
+
+    return @{
+        FilePath  = $filePath
+        Arguments = $argumentList
+        IsMsi     = $isMsi
+    }
+}
+
 # ===========================[ Script Start ]===============================
 Write-Log "======== Script Started ========" -Tag "Start"
 Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | App: $applicationName" -Tag "Info"
 
 Write-Log "Log file: '$logFile'" -Tag "Debug"
 
+# Validate required configuration
+if ([string]::IsNullOrWhiteSpace($applicationName)) {
+    Write-Log "Application name is not configured. Please set `$applicationName." -Tag "Error"
+    Stop-Script -ExitCode 1
+}
+
 # ========================================================================
-#  MODE 1: PACKAGED UNINSTALLER (NO REGISTRY USED AT ALL)
+#  MODE 1: PACKAGED UNINSTALLER
+#  Uses the installer file bundled in the IntuneWin package for uninstall.
+#  Registry is still used for post-uninstall validation.
 # ========================================================================
 if ($usePackagedUninstaller) {
 
-    Write-Log "Configured to use packaged installer for uninstall. Registry detection will be skipped." -Tag "Info"
+    Write-Log "Configured to use packaged installer for uninstall." -Tag "Info"
 
     if (-not (Test-Path -Path $installerPath)) {
         Write-Log "Packaged installer not found at path: $installerPath" -Tag "Error"
@@ -133,166 +571,46 @@ if ($usePackagedUninstaller) {
 
     Write-Log "Packaged installer found at path: $installerPath" -Tag "Success"
 
-    $installerExtension = [System.IO.Path]::GetExtension($installerPath)
-    Write-Log "Detected packaged installer extension: '$installerExtension'" -Tag "Debug"
-
-    $filePath     = $null
-    $argumentList = $null
-
-    switch ($installerExtension.ToLowerInvariant()) {
-        ".msi" {
-            Write-Log "Packaged installer identified as MSI. Preparing msiexec uninstall command line." -Tag "Info"
-            $filePath     = "msiexec.exe"
-            $argumentList = "/x `"$installerPath`" $uninstallerArgumentsMsi"
-
-            Write-Log "MSI uninstall file: $filePath" -Tag "Debug"
-            Write-Log "MSI uninstall arguments: $argumentList" -Tag "Debug"
-        }
-        ".exe" {
-            Write-Log "Packaged installer identified as EXE. Using EXE uninstall arguments." -Tag "Info"
-            $filePath     = $installerPath
-            $argumentList = $uninstallerArgumentsExe
-
-            Write-Log "EXE uninstall file: $filePath" -Tag "Debug"
-            Write-Log "EXE uninstall arguments: $argumentList" -Tag "Debug"
-        }
-        default {
-            Write-Log "Unsupported packaged installer extension '$installerExtension'. Only .exe and .msi are supported." -Tag "Error"
-            Stop-Script -ExitCode 1
-        }
-    }
-
-    try {
-        Write-Log "Launching packaged uninstall process: '$filePath' $argumentList" -Tag "Run"
-
-        $process = Start-Process -FilePath $filePath `
-                                 -ArgumentList $argumentList `
-                                 -Wait `
-                                 -PassThru `
-                                 -NoNewWindow
-
-        if ($null -eq $process) {
-            Write-Log "Start-Process did not return a process object. Uninstall result unknown." -Tag "Error"
-            Stop-Script -ExitCode 1
-        }
-
-        Write-Log "Packaged uninstall process ID: $($process.Id)" -Tag "Debug"
-        Write-Log "Packaged uninstall exit code: $($process.ExitCode)" -Tag "Info"
-
-        if ($process.ExitCode -eq 0) {
-            Write-Log "$applicationName uninstalled successfully using packaged installer." -Tag "Success"
-            Stop-Script -ExitCode 0
-        }
-        else {
-            Write-Log "Packaged uninstall returned non-zero exit code: $($process.ExitCode)" -Tag "Error"
-            Stop-Script -ExitCode 1
-        }
-    }
-    catch {
-        Write-Log "Packaged uninstall failed with exception: $($_.Exception.Message)" -Tag "Error"
-        Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+    $uninstallerCommand = Get-PackagedUninstallerCommand -InstallerPath $installerPath
+    if ($null -eq $uninstallerCommand) {
         Stop-Script -ExitCode 1
     }
+
+    $result = Invoke-UninstallWithValidation -FilePath $uninstallerCommand.FilePath `
+                                             -ArgumentList $uninstallerCommand.Arguments `
+                                             -IsMsi $uninstallerCommand.IsMsi `
+                                             -ApplicationName $applicationName `
+                                             -RegistryPaths $registrySearchPaths `
+                                             -Context "Packaged uninstall"
+
+    Stop-Script -ExitCode $result.ExitCode
 }
+else {
+    # ========================================================================
+    #  MODE 2: REGISTRY-BASED UNINSTALL
+    #  Searches registry for UninstallString and executes it directly.
+    #  Only executes when $usePackagedUninstaller = $false
+    # ========================================================================
+    Write-Log "Using registry-based uninstall (UninstallString) for '$applicationName'." -Tag "Info"
 
-# ========================================================================
-#  MODE 2: REGISTRY-BASED UNINSTALL (ONLY IF $usePackagedUninstaller = $false)
-# ========================================================================
+    $uninstallString = Get-ApplicationUninstallString -ApplicationName $applicationName -RegistryPaths $registrySearchPaths
 
-Write-Log "Using registry-based uninstall (UninstallString) for '$applicationName'." -Tag "Info"
-
-$applicationFound = $false
-
-foreach ($registryPath in $registrySearchPaths) {
-
-    Write-Log "Searching for '$applicationName' in registry path: $registryPath" -Tag "Get"
-
-    $subkeys = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
-    if ($null -eq $subkeys) {
-        Write-Log "No subkeys found in $registryPath" -Tag "Debug"
-        continue
+    if ($null -eq $uninstallString) {
+        Write-Log "Application '$applicationName' not found in registry or UninstallString is missing." -Tag "Error"
+        Stop-Script -ExitCode 1
     }
 
-    foreach ($subkey in $subkeys) {
-
-        $properties = Get-ItemProperty -Path $subkey.PSPath -ErrorAction SilentlyContinue
-        if ($null -eq $properties) { continue }
-
-        $displayName     = $properties.DisplayName
-        $uninstallString = $properties.UninstallString
-
-        if ($displayName) {
-            Write-Log "Found installed product: '$displayName'" -Tag "Debug"
-        }
-
-        if ($displayName -eq $applicationName) {
-
-            Write-Log "Found application '$displayName'" -Tag "Success"
-            $applicationFound = $true
-
-            if (-not $uninstallString) {
-                Write-Log "UninstallString missing for '$applicationName'." -Tag "Error"
-                Stop-Script -ExitCode 1
-            }
-
-            Write-Log "Original uninstall string: $uninstallString" -Tag "Debug"
-
-            $uninstallString = $uninstallString.Trim()
-
-            # MSI vs non-MSI handling
-            if ($uninstallString -match "msiexec.exe") {
-                Write-Log "MSI-based uninstaller detected. Ensuring MSI uninstall arguments are present." -Tag "Info"
-
-                if ($uninstallString -notmatch "/qn") {
-                    $uninstallString += " $uninstallerArgumentsMsi"
-                    Write-Log "Appended MSI uninstall arguments: $uninstallerArgumentsMsi" -Tag "Debug"
-                }
-                else {
-                    Write-Log "MSI uninstall string already contains '/qn'." -Tag "Debug"
-                }
-            }
-            else {
-                Write-Log "Non-MSI uninstaller detected. Appending EXE uninstall arguments: $uninstallerArgumentsExe" -Tag "Info"
-                $uninstallString += " $uninstallerArgumentsExe"
-            }
-
-            Write-Log "Final registry-based uninstall string: $uninstallString" -Tag "Debug"
-
-            try {
-                Write-Log "Starting uninstall process via cmd.exe /c ..." -Tag "Run"
-
-                $process = Start-Process -FilePath "cmd.exe" `
-                                         -ArgumentList "/c `"$uninstallString`"" `
-                                         -Wait `
-                                         -NoNewWindow
-
-                if ($null -eq $process) {
-                    Write-Log "Start-Process did not return a process object. Uninstall result unknown." -Tag "Error"
-                    Stop-Script -ExitCode 1
-                }
-
-                Write-Log "Uninstall process ID: $($process.Id)" -Tag "Debug"
-                Write-Log "Uninstall process exit code: $($process.ExitCode)" -Tag "Get"
-
-                if ($process.ExitCode -eq 0) {
-                    Write-Log "Uninstall completed successfully for '$applicationName'." -Tag "Success"
-                    Stop-Script -ExitCode 0
-                }
-                else {
-                    Write-Log "Uninstall process returned non-zero exit code: $($process.ExitCode)" -Tag "Error"
-                    Stop-Script -ExitCode $process.ExitCode
-                }
-            }
-            catch {
-                Write-Log "Uninstall failed with exception: $($_.Exception.Message)" -Tag "Error"
-                Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
-                Stop-Script -ExitCode 1
-            }
-        }
+    $uninstallerCommand = Get-ProcessedUninstallerCommand -UninstallString $uninstallString
+    if ($null -eq $uninstallerCommand) {
+        Stop-Script -ExitCode 1
     }
-}
 
-if (-not $applicationFound) {
-    Write-Log "Application '$applicationName' not found in registry." -Tag "Error"
-    Stop-Script -ExitCode 1
+    $result = Invoke-UninstallWithValidation -FilePath $uninstallerCommand.FilePath `
+                                              -ArgumentList $uninstallerCommand.Arguments `
+                                              -IsMsi $uninstallerCommand.IsMsi `
+                                              -ApplicationName $applicationName `
+                                              -RegistryPaths $registrySearchPaths `
+                                              -Context "Registry-based uninstall"
+
+    Stop-Script -ExitCode $result.ExitCode
 }
