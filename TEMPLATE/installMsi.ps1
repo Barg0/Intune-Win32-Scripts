@@ -211,7 +211,7 @@ function Test-InstallationVerification {
             }
         }
         catch {
-            Write-Log "Exception during verification attempt $attempt: $($_.Exception.Message)" -Tag "Error"
+            Write-Log "Exception during verification attempt $($attempt): $($_.Exception.Message)" -Tag "Error"
             Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
             # Continue to next retry attempt
         }
