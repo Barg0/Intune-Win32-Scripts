@@ -27,8 +27,18 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+$useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
+$applicationNameClean = if ($useWildcardMatching) {
+    # Remove wildcard characters for use in file paths
+    $applicationName -replace '[\*\?\[\]]', ''
+} else {
+    $applicationName
+}
+
 # ===========================[ Logging Configuration ]===========================
-$scriptName       = $applicationName
+$scriptName       = $applicationNameClean
 $logFileName      = "uninstall.log"
 
 # Logging configuration
@@ -130,11 +140,16 @@ function Test-ApplicationInRegistry {
     param(
         [string]$ApplicationName,
         [string[]]$RegistryPaths,
-        [switch]$SuppressLogging
+        [switch]$SuppressLogging,
+        [bool]$UseWildcardMatching = $false
     )
 
     if (-not $SuppressLogging) {
-        Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+        if ($UseWildcardMatching) {
+            Write-Log "Checking registry for application '$ApplicationName' (wildcard matching enabled)." -Tag "Get"
+        } else {
+            Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+        }
     }
 
     foreach ($registryPath in $RegistryPaths) {
@@ -154,7 +169,14 @@ function Test-ApplicationInRegistry {
 
             $displayName = $properties.DisplayName
 
-            if ($displayName -eq $ApplicationName) {
+            # Use wildcard matching if enabled, otherwise exact match
+            $isMatch = if ($UseWildcardMatching) {
+                $displayName -like $ApplicationName
+            } else {
+                $displayName -eq $ApplicationName
+            }
+
+            if ($isMatch) {
                 Write-Log "Application '$ApplicationName' found in registry at: $($subkey.PSPath)" -Tag "Debug"
                 return $true
             }
@@ -264,7 +286,8 @@ function Test-PostUninstallValidation {
         [string]$ApplicationName,
         [string[]]$RegistryPaths,
         [int]$MaxRetries = 3,
-        [int]$RetryDelay = 5
+        [int]$RetryDelay = 5,
+        [bool]$UseWildcardMatching = $false
     )
 
     Write-Log "Performing post-uninstall validation..." -Tag "Info"
@@ -276,7 +299,7 @@ function Test-PostUninstallValidation {
             Start-Sleep -Seconds $RetryDelay
         }
 
-        $applicationRemoved = -not (Test-ApplicationInRegistry -ApplicationName $ApplicationName -RegistryPaths $RegistryPaths -SuppressLogging)
+        $applicationRemoved = -not (Test-ApplicationInRegistry -ApplicationName $ApplicationName -RegistryPaths $RegistryPaths -SuppressLogging -UseWildcardMatching $UseWildcardMatching)
 
         if ($applicationRemoved) {
             Write-Log "Post-uninstall validation successful: Application removed from registry." -Tag "Success"
@@ -327,10 +350,15 @@ function Get-ApplicationUninstallString {
     param(
         [string]$ApplicationName,
         [string[]]$RegistryPaths,
-        [string]$ExcludeUninstallString = $null
+        [string]$ExcludeUninstallString = $null,
+        [bool]$UseWildcardMatching = $false
     )
 
-    Write-Log "Searching registry for application '$ApplicationName'..." -Tag "Get"
+    if ($UseWildcardMatching) {
+        Write-Log "Searching registry for application '$ApplicationName' (wildcard matching enabled)..." -Tag "Get"
+    } else {
+        Write-Log "Searching registry for application '$ApplicationName'..." -Tag "Get"
+    }
 
     foreach ($registryPath in $RegistryPaths) {
         if (-not (Test-Path -Path $registryPath)) {
@@ -357,7 +385,14 @@ function Get-ApplicationUninstallString {
                 Write-Log "Found installed product: '$displayName'" -Tag "Debug"
             }
 
-            if ($displayName -eq $ApplicationName) {
+            # Use wildcard matching if enabled, otherwise exact match
+            $isMatch = if ($UseWildcardMatching) {
+                $displayName -like $ApplicationName
+            } else {
+                $displayName -eq $ApplicationName
+            }
+
+            if ($isMatch) {
                 Write-Log "Found application '$displayName'" -Tag "Success"
                 
                 if ([string]::IsNullOrWhiteSpace($uninstallString)) {
@@ -570,7 +605,8 @@ function Invoke-UninstallWithValidation {
         [string]$ApplicationName,
         [string[]]$RegistryPaths,
         [string]$Context = "Uninstall",
-        [string]$OriginalUninstallString = $null
+        [string]$OriginalUninstallString = $null,
+        [bool]$UseWildcardMatching = $false
     )
 
     try {
@@ -595,7 +631,8 @@ function Invoke-UninstallWithValidation {
             }
 
             $validationSuccess = Test-PostUninstallValidation -ApplicationName $ApplicationName `
-                                                               -RegistryPaths $RegistryPaths
+                                                               -RegistryPaths $RegistryPaths `
+                                                               -UseWildcardMatching $UseWildcardMatching
 
             if ($validationSuccess) {
                 # Pass the original exit code to Stop-Script (Intune will interpret it)
@@ -615,7 +652,8 @@ function Invoke-UninstallWithValidation {
                 
                 $alternativeUninstallString = Get-ApplicationUninstallString -ApplicationName $ApplicationName `
                                                                            -RegistryPaths $RegistryPaths `
-                                                                           -ExcludeUninstallString $OriginalUninstallString
+                                                                           -ExcludeUninstallString $OriginalUninstallString `
+                                                                           -UseWildcardMatching $UseWildcardMatching
                 
                 if (-not [string]::IsNullOrWhiteSpace($alternativeUninstallString)) {
                     Write-Log "Found alternative UninstallString. Executing fallback uninstall..." -Tag "Info"
@@ -638,7 +676,8 @@ function Invoke-UninstallWithValidation {
                                 # Re-validate after fallback uninstall
                                 Write-Log "Re-validating after fallback uninstall..." -Tag "Info"
                                 $fallbackValidationSuccess = Test-PostUninstallValidation -ApplicationName $ApplicationName `
-                                                                                        -RegistryPaths $RegistryPaths
+                                                                                        -RegistryPaths $RegistryPaths `
+                                                                                        -UseWildcardMatching $UseWildcardMatching
                                 
                                 if ($fallbackValidationSuccess) {
                                     Write-Log "Fallback uninstall and validation successful." -Tag "Success"
@@ -762,7 +801,8 @@ if ($usePackagedUninstaller) {
                                              -IsMsi $uninstallerCommand.IsMsi `
                                              -ApplicationName $applicationName `
                                              -RegistryPaths $registrySearchPaths `
-                                             -Context "Packaged uninstall"
+                                             -Context "Packaged uninstall" `
+                                             -UseWildcardMatching $useWildcardMatching
 
     Stop-Script -ExitCode $result.ExitCode
 }
@@ -774,7 +814,7 @@ else {
     # ========================================================================
     Write-Log "Using registry-based uninstall (UninstallString) for '$applicationName'." -Tag "Info"
 
-    $uninstallString = Get-ApplicationUninstallString -ApplicationName $applicationName -RegistryPaths $registrySearchPaths
+    $uninstallString = Get-ApplicationUninstallString -ApplicationName $applicationName -RegistryPaths $registrySearchPaths -UseWildcardMatching $useWildcardMatching
 
     if ($null -eq $uninstallString) {
         Write-Log "Application '$applicationName' not found in registry or UninstallString is missing." -Tag "Error"
@@ -792,7 +832,8 @@ else {
                                               -ApplicationName $applicationName `
                                               -RegistryPaths $registrySearchPaths `
                                               -Context "Registry-based uninstall" `
-                                              -OriginalUninstallString $uninstallString
+                                              -OriginalUninstallString $uninstallString `
+                                              -UseWildcardMatching $useWildcardMatching
 
     Stop-Script -ExitCode $result.ExitCode
 }

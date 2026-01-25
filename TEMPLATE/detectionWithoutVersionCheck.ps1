@@ -12,8 +12,18 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+$useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
+$applicationNameClean = if ($useWildcardMatching) {
+    # Remove wildcard characters for use in file paths
+    $applicationName -replace '[\*\?\[\]]', ''
+} else {
+    $applicationName
+}
+
 # ===========================[ Logging Configuration ]====================
-$scriptName       = $applicationName
+$scriptName       = $applicationNameClean
 $logFileName      = "detection.log"
 
 # Logging configuration
@@ -115,7 +125,11 @@ Write-Log "Log file: '$logFile'" -Tag "Debug"
 
 $applicationFound = $false
 
-Write-Log "Checking registry for application '$applicationName'." -Tag "Get"
+if ($useWildcardMatching) {
+    Write-Log "Checking registry for application '$applicationName' (wildcard matching enabled)." -Tag "Get"
+} else {
+    Write-Log "Checking registry for application '$applicationName'." -Tag "Get"
+}
 
 foreach ($registryPath in $registrySearchPaths) {
 
@@ -149,7 +163,14 @@ foreach ($registryPath in $registrySearchPaths) {
             Write-Log "Found product: '$displayName'" -Tag "Debug"
         }
 
-        if ($displayName -eq $applicationName) {
+        # Use wildcard matching if enabled, otherwise exact match
+        $isMatch = if ($useWildcardMatching) {
+            $displayName -like $applicationName
+        } else {
+            $displayName -eq $applicationName
+        }
+
+        if ($isMatch) {
             Write-Log "Match found for application: '$displayName'" -Tag "Success"
             $applicationFound = $true
             break

@@ -124,6 +124,17 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 
 **Important:** The `DisplayName` must match **exactly** (case-sensitive, including spaces and special characters).
 
+> [!TIP]
+> **Wildcard Support:** If your application's `DisplayName` changes with version numbers (e.g., "innovaphone myApps 1510655"), you can use wildcard matching by adding a `*` to the end of `$applicationName`:
+> 
+> ```powershell
+> $applicationName = "innovaphone myApps*"
+> ```
+> 
+> This will match any `DisplayName` that starts with "innovaphone myApps" (e.g., "innovaphone myApps 1510655", "innovaphone myApps 1510656", etc.). The wildcard characters (`*`, `?`, `[`, `]`) are automatically removed from log folder paths, so logs will still be saved to `C:\ProgramData\IntuneLogs\Applications\innovaphone myApps\`.
+> 
+> **Note:** When using wildcards, the script uses PowerShell's `-like` operator for matching instead of exact matching (`-eq`). This feature works in all scripts (install, uninstall, and detection).
+
 **`$applicationVersion` - Registry DisplayVersion (for detection scripts with version check)**
 
 If using `detectionWithVersionCheck.ps1`, you also need to set `$applicationVersion` to match the **exact `DisplayVersion`** value from the registry.
@@ -240,6 +251,17 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 
 **Important:** The `DisplayName` must match **exactly** (case-sensitive, including spaces and special characters).
 
+> [!TIP]
+> **Wildcard Support:** If your application's `DisplayName` changes with version numbers (e.g., "innovaphone myApps 1510655"), you can use wildcard matching by adding a `*` to the end of `$applicationName`:
+> 
+> ```powershell
+> $applicationName = "innovaphone myApps*"
+> ```
+> 
+> This will match any `DisplayName` that starts with "innovaphone myApps" (e.g., "innovaphone myApps 1510655", "innovaphone myApps 1510656", etc.). The wildcard characters (`*`, `?`, `[`, `]`) are automatically removed from log folder paths, so logs will still be saved to `C:\ProgramData\IntuneLogs\Applications\innovaphone myApps\`.
+> 
+> **Note:** When using wildcards, the script uses PowerShell's `-like` operator for matching instead of exact matching (`-eq`). This feature works in all scripts (install, uninstall, and detection).
+
 **`$applicationVersion` - Registry DisplayVersion (for detection scripts with version check)**
 
 If using `detectionWithVersionCheck.ps1`, you also need to set `$applicationVersion` to match the **exact `DisplayVersion`** value from the registry.
@@ -302,6 +324,10 @@ Includes automatic post-uninstall validation and fallback mechanisms.
 ```powershell
 $applicationName = "__REGISTRY_DISPLAY_NAME__"
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+# Example: "innovaphone myApps*" will match "innovaphone myApps 1510655" and logs will be saved to "innovaphone myApps\"
+
 # Mode selection
 $usePackagedUninstaller = $false   # $true = packaged uninstaller, $false = registry-based
 
@@ -333,7 +359,7 @@ $registrySearchPaths = @(
 
 ### ✅ Mode B — Registry-Based Uninstall (`$usePackagedUninstaller = $false`)
 
-* 🔍 Searches uninstall registry keys for `DisplayName -eq $applicationName`
+* 🔍 Searches uninstall registry keys for `DisplayName` matching `$applicationName` (exact match or wildcard match if `*` is present)
 * 📖 Reads `UninstallString` from registry
 * 🧠 Automatically detects MSI vs EXE uninstallers
 * 🧠 If MSI → ensures `/qn` or `$uninstallerArgumentsMsi` is present
@@ -381,6 +407,7 @@ $registrySearchPaths = @(
 
 * Loops over all 📁 subkeys under each `$registrySearchPaths` entry
 * Reads `DisplayName` and `DisplayVersion` for each key
+* Uses wildcard matching (`-like`) if `$applicationName` contains wildcard characters, otherwise exact matching (`-eq`)
 * When both match:
   * ✅ Logs a success entry
   * ✅ Calls `Stop-Script -ExitCode 0`
@@ -418,7 +445,8 @@ $registrySearchPaths = @(
 
 * Loops over uninstall registry keys
 * Reads `DisplayName`
-* When `DisplayName -eq $applicationName`:
+* Uses wildcard matching (`-like`) if `$applicationName` contains wildcard characters, otherwise exact matching (`-eq`)
+* When `DisplayName` matches `$applicationName`:
   * ✅ Logs success
   * ✅ Exits with `0`
 * Otherwise:
@@ -939,6 +967,69 @@ $enableLogFile = $true    # Enable/disable file logging
 
 ---
 
+## 🌟 Wildcard Support Feature
+
+### 🎯 Purpose
+
+Some applications (like Citrix Workspace or innovaphone MyApps) change their `DisplayName` in the registry according to version numbers. For example:
+- `"innovaphone myApps 1510655"`
+- `"innovaphone myApps 1510656"`
+- `"Citrix Workspace 2402.1.0.12"`
+
+Instead of updating your scripts every time a new version is released, you can use wildcard matching.
+
+### 📝 How to Use
+
+Simply add a wildcard character (`*`) to your `$applicationName` variable:
+
+```powershell
+$applicationName = "innovaphone myApps*"
+```
+
+This will match any `DisplayName` that starts with "innovaphone myApps", regardless of what comes after.
+
+### ✅ Supported Wildcard Characters
+
+* `*` - Matches zero or more characters
+* `?` - Matches exactly one character
+* `[abc]` - Matches any character in the brackets
+* `[a-z]` - Matches any character in the range
+
+### 📁 Log Path Behavior
+
+When wildcard characters are detected in `$applicationName`, they are automatically removed from log folder paths:
+
+* **With wildcard:** `$applicationName = "innovaphone myApps*"`
+* **Log folder:** `C:\ProgramData\IntuneLogs\Applications\innovaphone myApps\`
+
+This ensures clean folder names without special characters.
+
+### 🔍 Where It Works
+
+Wildcard support is available in **all scripts**:
+* ✅ `installExe.ps1` / `installMsi.ps1` - Post-installation verification
+* ✅ `uninstall.ps1` - Registry lookup and validation
+* ✅ `detectionWithVersionCheck.ps1` - DisplayName matching (version still requires exact match)
+* ✅ `detectionWithoutVersionCheck.ps1` - DisplayName matching
+
+### 📌 Important Notes
+
+1. **Version matching:** In `detectionWithVersionCheck.ps1`, the `DisplayName` uses wildcard matching, but `DisplayVersion` still requires an exact match.
+
+2. **Backward compatibility:** If your `$applicationName` doesn't contain wildcard characters, the scripts will use exact matching (`-eq`) as before. No changes needed for existing deployments.
+
+3. **Example usage:**
+   ```powershell
+   # Exact match (existing behavior)
+   $applicationName = "Microsoft Visual Studio Code"
+   
+   # Wildcard match (new feature)
+   $applicationName = "innovaphone myApps*"
+   $applicationName = "Citrix Workspace*"
+   ```
+
+---
+
 ## 🛠 Troubleshooting Tips
 
 ### ⚠️ Install Issues
@@ -963,8 +1054,9 @@ $enableLogFile = $true    # Enable/disable file logging
 * Confirm `DisplayName` / `DisplayVersion` in:
   * `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
   * `HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
-* Ensure the `DisplayName` matches exactly (case-sensitive)
+* Ensure the `DisplayName` matches exactly (case-sensitive) or use wildcard matching if the name changes with versions
 * For version detection, verify the `DisplayVersion` format matches exactly
+* If using wildcards, test the pattern manually: `"DisplayName" -like "YourPattern*"`
 
 ### ⚠️ Logging Issues
 

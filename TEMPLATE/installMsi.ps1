@@ -30,8 +30,18 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+$useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
+$applicationNameClean = if ($useWildcardMatching) {
+    # Remove wildcard characters for use in file paths
+    $applicationName -replace '[\*\?\[\]]', ''
+} else {
+    $applicationName
+}
+
 # ===========================[ Logging Configuration ]=====================
-$scriptName       = $applicationName
+$scriptName       = $applicationNameClean
 $logFileName      = "install.log"
 
 # Logging configuration
@@ -189,7 +199,8 @@ function Test-InstallationVerification {
         [string]$ApplicationName,
         [string[]]$RegistryPaths,
         [int]$MaxRetries = 3,
-        [int]$RetryDelay = 5
+        [int]$RetryDelay = 5,
+        [bool]$UseWildcardMatching = $false
     )
 
     Write-Log "Waiting for registry keys to be populated..." -Tag "Info"
@@ -203,7 +214,7 @@ function Test-InstallationVerification {
         }
 
         try {
-            $applicationFound = Test-ApplicationInstalled -ApplicationName $ApplicationName -RegistryPaths $RegistryPaths
+            $applicationFound = Test-ApplicationInstalled -ApplicationName $ApplicationName -RegistryPaths $RegistryPaths -UseWildcardMatching $UseWildcardMatching
 
             if ($applicationFound) {
                 Write-Log "$ApplicationName is installed and verified in registry." -Tag "Success"
@@ -263,10 +274,15 @@ function Test-ApplicationInstalled {
     [CmdletBinding()]
     param(
         [string]$ApplicationName,
-        [string[]]$RegistryPaths
+        [string[]]$RegistryPaths,
+        [bool]$UseWildcardMatching = $false
     )
 
-    Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+    if ($UseWildcardMatching) {
+        Write-Log "Checking registry for application '$ApplicationName' (wildcard matching enabled)." -Tag "Get"
+    } else {
+        Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+    }
 
     # Search through all specified registry paths
     foreach ($registryPath in $RegistryPaths) {
@@ -300,8 +316,15 @@ function Test-ApplicationInstalled {
                 Write-Log "Found product: '$displayName'" -Tag "Debug"
             }
 
+            # Use wildcard matching if enabled, otherwise exact match
+            $isMatch = if ($UseWildcardMatching) {
+                $displayName -like $ApplicationName
+            } else {
+                $displayName -eq $ApplicationName
+            }
+
             # Match found - application is installed
-            if ($displayName -eq $ApplicationName) {
+            if ($isMatch) {
                 Write-Log "Match found for application: '$displayName'" -Tag "Success"
                 return $true
             }
@@ -397,7 +420,8 @@ catch {
 # ===========================[ Installation Verification ]=======================
 # Verify installation by checking registry for the application
 $verificationSuccess = Test-InstallationVerification -ApplicationName $applicationName `
-                                                      -RegistryPaths $registrySearchPaths
+                                                      -RegistryPaths $registrySearchPaths `
+                                                      -UseWildcardMatching $useWildcardMatching
 
 if ($verificationSuccess) {
     # Pass the original exit code to Stop-Script (Intune will interpret it)

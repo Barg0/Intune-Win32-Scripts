@@ -19,8 +19,18 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+$useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
+$applicationNameClean = if ($useWildcardMatching) {
+    # Remove wildcard characters for use in file paths
+    $applicationName -replace '[\*\?\[\]]', ''
+} else {
+    $applicationName
+}
+
 # ===========================[ Logging Configuration ]=====================
-$scriptName       = $applicationName
+$scriptName       = $applicationNameClean
 $logFileName      = "install.log"
 
 # Logging configuration
@@ -117,10 +127,15 @@ function Test-ApplicationInstalled {
     [CmdletBinding()]
     param(
         [string]$ApplicationName,
-        [string[]]$RegistryPaths
+        [string[]]$RegistryPaths,
+        [bool]$UseWildcardMatching = $false
     )
 
-    Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+    if ($UseWildcardMatching) {
+        Write-Log "Checking registry for application '$ApplicationName' (wildcard matching enabled)." -Tag "Get"
+    } else {
+        Write-Log "Checking registry for application '$ApplicationName'." -Tag "Get"
+    }
 
     foreach ($registryPath in $RegistryPaths) {
         if (-not (Test-Path -Path $registryPath)) {
@@ -152,7 +167,14 @@ function Test-ApplicationInstalled {
                 Write-Log "Found product: '$displayName'" -Tag "Debug"
             }
 
-            if ($displayName -eq $ApplicationName) {
+            # Use wildcard matching if enabled, otherwise exact match
+            $isMatch = if ($UseWildcardMatching) {
+                $displayName -like $ApplicationName
+            } else {
+                $displayName -eq $ApplicationName
+            }
+
+            if ($isMatch) {
                 Write-Log "Match found for application: '$displayName'" -Tag "Success"
                 return $true
             }
@@ -218,7 +240,7 @@ for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
         Start-Sleep -Seconds $retryDelay
     }
 
-    $applicationFound = Test-ApplicationInstalled -ApplicationName $applicationName -RegistryPaths $registrySearchPaths
+    $applicationFound = Test-ApplicationInstalled -ApplicationName $applicationName -RegistryPaths $registrySearchPaths -UseWildcardMatching $useWildcardMatching
 
     if ($applicationFound) {
         Write-Log "$applicationName is installed and verified in registry." -Tag "Success"

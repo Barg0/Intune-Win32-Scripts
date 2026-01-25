@@ -13,8 +13,18 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
+# The clean name (without *) is used for log paths and folder names
+$useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
+$applicationNameClean = if ($useWildcardMatching) {
+    # Remove wildcard characters for use in file paths
+    $applicationName -replace '[\*\?\[\]]', ''
+} else {
+    $applicationName
+}
+
 # ===========================[ Logging Configuration ]====================
-$scriptName       = $applicationName
+$scriptName       = $applicationNameClean
 $logFileName      = "detection.log"
 
 # Logging configuration
@@ -116,7 +126,11 @@ Write-Log "Log file: '$logFile'" -Tag "Debug"
 
 $applicationFound = $false
 
-Write-Log "Checking registry for application '$applicationName' Version '$applicationVersion'." -Tag "Get"
+if ($useWildcardMatching) {
+    Write-Log "Checking registry for application '$applicationName' Version '$applicationVersion' (wildcard matching enabled)." -Tag "Get"
+} else {
+    Write-Log "Checking registry for application '$applicationName' Version '$applicationVersion'." -Tag "Get"
+}
 
 foreach ($registryPath in $registrySearchPaths) {
 
@@ -151,7 +165,16 @@ foreach ($registryPath in $registrySearchPaths) {
             Write-Log "Found product: '$displayName' Version: '$displayVersion'" -Tag "Debug"
         }
 
-        if ($displayName -eq $applicationName -and $displayVersion -eq $applicationVersion) {
+        # Use wildcard matching for DisplayName if enabled, otherwise exact match
+        # Version is always exact match
+        $nameMatch = if ($useWildcardMatching) {
+            $displayName -like $applicationName
+        } else {
+            $displayName -eq $applicationName
+        }
+        $versionMatch = $displayVersion -eq $applicationVersion
+
+        if ($nameMatch -and $versionMatch) {
             Write-Log "Match found: $displayName ($displayVersion)" -Tag "Success"
             $applicationFound = $true
             break
