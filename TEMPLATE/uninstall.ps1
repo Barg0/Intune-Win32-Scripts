@@ -479,8 +479,8 @@ function Get-ProcessedUninstallerCommand {
         # Match case-insensitively: /I, /i, /I{, /i{
         if ($uninstallString -match '/[iI]\{([a-fA-F0-9\-]+)\}') {
             $productCode = $matches[1]
-            # Replace /I or /i with /X (case-insensitive replacement)
-            $uninstallString = $uninstallString -replace '/[iI]\{' + [regex]::Escape($productCode) + '\}', "/X{$productCode}"
+            # Replace /I or /i with /X (simple replacement - case-insensitive)
+            $uninstallString = $uninstallString -replace '/[iI]\{', '/X{'
             Write-Log "Corrected MSI switch from /I (install) to /X (uninstall) for product code: $productCode" -Tag "Info"
         }
 
