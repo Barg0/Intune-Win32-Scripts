@@ -639,7 +639,6 @@ $enableLogFile = $true    # Enable/disable file logging
 ```
 
 ### 📋 Log Examples
-
 ---
 
 ## 📦 Installation Script Log Examples
@@ -649,9 +648,6 @@ $enableLogFile = $true    # Enable/disable file logging
 ```
 2026-01-25 10:15:23 [  Start   ] ======== Script Started ========
 2026-01-25 10:15:23 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:15:23 [  Debug   ] Script configuration - InstallerName: 'setup.exe'
-2026-01-25 10:15:23 [  Debug   ] Script configuration - InstallerPath: 'C:\Program Files\IntuneApps\MyApp\setup.exe'
-2026-01-25 10:15:23 [  Debug   ] Script configuration - LogFile: 'C:\ProgramData\IntuneLogs\Applications\My Application\install.log'
 2026-01-25 10:15:23 [  Get     ] Validating installer path...
 2026-01-25 10:15:23 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
 2026-01-25 10:15:23 [  Run     ] Starting installation for 'My Application'.
@@ -812,22 +808,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 10:50:15 [  End     ] ======== Script Completed ========
 ```
 
-### Example 9: Installation Failure - MSI Arguments Construction Failed
-
-```
-2026-01-25 10:55:20 [  Start   ] ======== Script Started ========
-2026-01-25 10:55:20 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:55:20 [  Get     ] Validating installer path...
-2026-01-25 10:55:20 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.msi
-2026-01-25 10:55:20 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 10:55:20 [  Error   ] InstallerPath is empty or null. Cannot construct MSI arguments.
-2026-01-25 10:55:20 [  Error   ] Failed to construct MSI arguments. Installation cannot proceed.
-2026-01-25 10:55:20 [  Info    ] Script execution time: 00:00:00.34
-2026-01-25 10:55:20 [  Info    ] Exit Code: 1
-2026-01-25 10:55:20 [  End     ] ======== Script Completed ========
-```
-
-### Example 10: Installation Failure - Process Exception
+### Example 9: Installation Failure - Process Exception
 
 ```
 2026-01-25 11:00:25 [  Start   ] ======== Script Started ========
@@ -843,31 +824,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:00:25 [  End     ] ======== Script Completed ========
 ```
 
-### Example 11: Installation Failure - Process Returned Null (EXE)
-
-```
-2026-01-25 11:05:30 [  Start   ] ======== Script Started ========
-2026-01-25 11:05:30 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:05:30 [  Get     ] Validating installer path...
-2026-01-25 11:05:30 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
-2026-01-25 11:05:30 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 11:05:30 [  Debug   ] Launching process: 'C:\Program Files\IntuneApps\MyApp\setup.exe' with arguments: /silent
-2026-01-25 11:05:30 [  Error   ] Start-Process did not return a process object. Installation may have failed to start.
-2026-01-25 11:05:30 [  Info    ] Installer process has completed. Verifying installation via registry detection...
-2026-01-25 11:05:30 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 11:05:30 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:05:30 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:05:31 [  Info    ] Retry attempt 2 of 3 after 5 seconds...
-2026-01-25 11:05:36 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:05:36 [  Info    ] Retry attempt 3 of 3 after 5 seconds...
-2026-01-25 11:05:41 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:05:41 [  Error   ] My Application was not found in registry after 3 attempts. Installation may have failed.
-2026-01-25 11:05:41 [  Info    ] Script execution time: 00:00:16.12
-2026-01-25 11:05:41 [  Info    ] Exit Code: 1
-2026-01-25 11:05:41 [  End     ] ======== Script Completed ========
-```
-
-### Example 12: Installation Failure - Verification Failed After All Retries
+### Example 10: Installation Failure - Verification Failed After All Retries
 
 ```
 2026-01-25 11:10:35 [  Start   ] ======== Script Started ========
@@ -895,11 +852,33 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:10:52 [  End     ] ======== Script Completed ========
 ```
 
+### Example 11: MSI Installation - Process Null but Verification Continues
+
+```
+2026-01-25 11:10:40 [  Start   ] ======== Script Started ========
+2026-01-25 11:10:40 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
+2026-01-25 11:10:40 [  Get     ] Validating installer path...
+2026-01-25 11:10:40 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.msi
+2026-01-25 11:10:40 [  Run     ] Starting installation for 'My Application'.
+2026-01-25 11:10:40 [  Debug   ] Launching MSI installation via msiexec.exe with arguments: /i "C:\Program Files\IntuneApps\MyApp\setup.msi" /qn /norestart
+2026-01-25 11:10:40 [  Error   ] Start-Process did not return a process object. MSI installation result unknown.
+2026-01-25 11:10:40 [  Info    ] MSI installer process has completed. Verifying installation via registry detection...
+2026-01-25 11:10:40 [  Info    ] Continuing to verification - installation may have succeeded despite process object being null.
+2026-01-25 11:10:40 [  Info    ] Waiting for registry keys to be populated...
+2026-01-25 11:10:40 [  Get     ] Checking registry for application 'My Application'.
+2026-01-25 11:10:40 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
+2026-01-25 11:10:41 [  Success ] Match found for application: 'My Application'
+2026-01-25 11:10:41 [  Success ] My Application is installed and verified in registry.
+2026-01-25 11:10:41 [  Info    ] Script execution time: 00:00:01.45
+2026-01-25 11:10:41 [  Info    ] Exit Code: 0
+2026-01-25 11:10:41 [  End     ] ======== Script Completed ========
+```
+
 ---
 
 ## 🗑️ Uninstall Script Log Examples
 
-### Example 13: Successful Uninstall - Packaged Uninstaller (EXE)
+### Example 12: Successful Uninstall - Packaged Uninstaller (EXE)
 
 ```
 2026-01-25 11:15:40 [  Start   ] ======== Script Started ========
@@ -922,7 +901,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:15:50 [  End     ] ======== Script Completed ========
 ```
 
-### Example 14: Successful Uninstall - Packaged Uninstaller (MSI)
+### Example 13: Successful Uninstall - Packaged Uninstaller (MSI)
 
 ```
 2026-01-25 11:20:45 [  Start   ] ======== Script Started ========
@@ -943,7 +922,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:20:45 [  End     ] ======== Script Completed ========
 ```
 
-### Example 15: Successful Uninstall - Registry-Based (EXE)
+### Example 14: Successful Uninstall - Registry-Based (EXE)
 
 ```
 2026-01-25 11:25:50 [  Start   ] ======== Script Started ========
@@ -971,7 +950,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:25:55 [  End     ] ======== Script Completed ========
 ```
 
-### Example 16: Successful Uninstall - Registry-Based (MSI)
+### Example 15: Successful Uninstall - Registry-Based (MSI)
 
 ```
 2026-01-25 11:30:55 [  Start   ] ======== Script Started ========
@@ -997,7 +976,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:30:55 [  End     ] ======== Script Completed ========
 ```
 
-### Example 17: Successful Uninstall with Retry Validation
+### Example 16: Successful Uninstall with Retry Validation
 
 ```
 2026-01-25 11:35:00 [  Start   ] ======== Script Started ========
@@ -1020,7 +999,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:35:15 [  End     ] ======== Script Completed ========
 ```
 
-### Example 18: Uninstall with Exit Code 3010 (Reboot Required)
+### Example 17: Uninstall with Exit Code 3010 (Reboot Required)
 
 ```
 2026-01-25 11:40:05 [  Start   ] ======== Script Started ========
@@ -1039,7 +1018,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:40:05 [  End     ] ======== Script Completed ========
 ```
 
-### Example 19: Uninstall Failure - Application Not Found in Registry
+### Example 18: Uninstall Failure - Application Not Found in Registry
 
 ```
 2026-01-25 11:45:10 [  Start   ] ======== Script Started ========
@@ -1054,7 +1033,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:45:10 [  End     ] ======== Script Completed ========
 ```
 
-### Example 20: Uninstall Failure - Packaged Uninstaller Not Found
+### Example 19: Uninstall Failure - Packaged Uninstaller Not Found
 
 ```
 2026-01-25 11:50:15 [  Start   ] ======== Script Started ========
@@ -1067,7 +1046,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:50:15 [  End     ] ======== Script Completed ========
 ```
 
-### Example 21: Uninstall Failure - Validation Failed, Fallback Successful
+### Example 20: Uninstall Failure - Validation Failed, Fallback Successful
 
 ```
 2026-01-25 11:55:20 [  Start   ] ======== Script Started ========
@@ -1102,7 +1081,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:55:40 [  End     ] ======== Script Completed ========
 ```
 
-### Example 22: Uninstall Failure - Validation Failed, No Fallback Available
+### Example 21: Uninstall Failure - Validation Failed, No Fallback Available
 
 ```
 2026-01-25 12:00:25 [  Start   ] ======== Script Started ========
@@ -1129,7 +1108,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:00:40 [  End     ] ======== Script Completed ========
 ```
 
-### Example 23: Uninstall Failure - Unsupported Packaged Installer Extension
+### Example 22: Uninstall Failure - Unsupported Packaged Installer Extension
 
 ```
 2026-01-25 12:05:30 [  Start   ] ======== Script Started ========
@@ -1148,7 +1127,7 @@ $enableLogFile = $true    # Enable/disable file logging
 
 ## 🔍 Detection Script Log Examples
 
-### Example 24: Detection with Version Check - Success
+### Example 23: Detection with Version Check - Success
 
 ```
 2026-01-25 12:10:35 [  Start   ] ========== Detection Script ==========
@@ -1166,7 +1145,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:10:36 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 25: Detection with Version Check - Wrong Version
+### Example 24: Detection with Version Check - Wrong Version
 
 ```
 2026-01-25 12:15:40 [  Start   ] ========== Detection Script ==========
@@ -1181,7 +1160,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:15:42 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 26: Detection with Version Check - Application Not Found
+### Example 25: Detection with Version Check - Application Not Found
 
 ```
 2026-01-25 12:20:45 [  Start   ] ========== Detection Script ==========
@@ -1196,7 +1175,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:20:47 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 27: Detection without Version Check - Success
+### Example 26: Detection without Version Check - Success
 
 ```
 2026-01-25 12:25:50 [  Start   ] ========== Detection Script ==========
@@ -1213,7 +1192,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:25:51 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 28: Detection without Version Check - Application Not Found
+### Example 27: Detection without Version Check - Application Not Found
 
 ```
 2026-01-25 12:30:55 [  Start   ] ========== Detection Script ==========
