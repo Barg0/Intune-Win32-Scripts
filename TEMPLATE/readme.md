@@ -11,10 +11,7 @@ This repository provides a **reusable, configurable, and standardized PowerShell
 You can deploy **any Win32 application** by modifying just a few variables at the top of each 📜 script.
 
 ---
-
-## ⚠️ **IMPORTANT: File Renaming Required** ⚠️
-
-> [!WARNING]
+> [!INFO]
 > **Before packaging your application, you SHOULD rename the script files:**
 >
 > | 📜 Original Template File | ➡️ Rename To | 📝 When To Use |
