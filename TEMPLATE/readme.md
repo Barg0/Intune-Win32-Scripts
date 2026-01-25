@@ -509,7 +509,10 @@ Fill out Name, Description, Publisher, etc.
 ```
 
 * Install behavior: `System`
-* Device restart behavior: as required (often `No specific action`)
+* Device restart behavior: `Determine behavior based on return codes`
+  * `0` - Success
+  * `1` - Failed
+  * `3010` - Hard reboot
 
 ---
 
@@ -643,7 +646,7 @@ $enableLogFile = $true    # Enable/disable file logging
 
 ## 📦 Installation Script Log Examples
 
-### Example 1: Successful EXE Installation (First Attempt)
+### Example 1: Successful EXE Installation
 
 ```
 2026-01-25 10:15:23 [  Start   ] ======== Script Started ========
@@ -665,32 +668,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 10:15:29 [  End     ] ======== Script Completed ========
 ```
 
-### Example 2: Successful EXE Installation (With Retry)
-
-```
-2026-01-25 10:20:15 [  Start   ] ======== Script Started ========
-2026-01-25 10:20:15 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:20:15 [  Get     ] Validating installer path...
-2026-01-25 10:20:15 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
-2026-01-25 10:20:15 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 10:20:15 [  Debug   ] Launching process: 'C:\Program Files\IntuneApps\MyApp\setup.exe' with arguments: /silent
-2026-01-25 10:20:15 [  Debug   ] Installer process ID: 12350
-2026-01-25 10:20:20 [  Info    ] Installer process has completed. Verifying installation via registry detection...
-2026-01-25 10:20:20 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 10:20:20 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 10:20:20 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:20:20 [  Debug   ] Found 156 subkeys under: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:20:21 [  Info    ] Retry attempt 2 of 3 after 5 seconds...
-2026-01-25 10:20:26 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 10:20:26 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:20:26 [  Success ] Match found for application: 'My Application'
-2026-01-25 10:20:26 [  Success ] My Application is installed and verified in registry.
-2026-01-25 10:20:26 [  Info    ] Script execution time: 00:00:11.23
-2026-01-25 10:20:26 [  Info    ] Exit Code: 0
-2026-01-25 10:20:26 [  End     ] ======== Script Completed ========
-```
-
-### Example 3: Successful MSI Installation (First Attempt)
+### Example 2: Successful MSI Installation
 
 ```
 2026-01-25 10:25:10 [  Start   ] ======== Script Started ========
@@ -713,33 +691,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 10:25:11 [  End     ] ======== Script Completed ========
 ```
 
-### Example 4: Successful MSI Installation (With Retry)
-
-```
-2026-01-25 10:30:15 [  Start   ] ======== Script Started ========
-2026-01-25 10:30:15 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:30:15 [  Get     ] Validating installer path...
-2026-01-25 10:30:15 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.msi
-2026-01-25 10:30:15 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 10:30:15 [  Debug   ] Launching MSI installation via msiexec.exe with arguments: /i "C:\Program Files\IntuneApps\MyApp\setup.msi" /qn /norestart
-2026-01-25 10:30:15 [  Debug   ] MSI installation process ID: 12360
-2026-01-25 10:30:15 [  Info    ] MSI installation exit code: 0
-2026-01-25 10:30:15 [  Success ] MSI installation completed successfully.
-2026-01-25 10:30:15 [  Info    ] MSI installer process has completed. Verifying installation via registry detection...
-2026-01-25 10:30:15 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 10:30:15 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 10:30:15 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:30:16 [  Info    ] Retry attempt 2 of 3 after 5 seconds...
-2026-01-25 10:30:21 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 10:30:21 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:30:21 [  Success ] Match found for application: 'My Application'
-2026-01-25 10:30:21 [  Success ] My Application is installed and verified in registry.
-2026-01-25 10:30:21 [  Info    ] Script execution time: 00:00:06.78
-2026-01-25 10:30:21 [  Info    ] Exit Code: 0
-2026-01-25 10:30:21 [  End     ] ======== Script Completed ========
-```
-
-### Example 5: MSI Installation with Exit Code 3010 (Reboot Required)
+### Example 3: MSI Installation with Exit Code 3010 (Reboot Required)
 
 ```
 2026-01-25 10:35:20 [  Start   ] ======== Script Started ========
@@ -762,123 +714,11 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 10:35:21 [  End     ] ======== Script Completed ========
 ```
 
-### Example 6: MSI Installation with Non-Zero Exit Code (But Verification Succeeds)
-
-```
-2026-01-25 10:40:10 [  Start   ] ======== Script Started ========
-2026-01-25 10:40:10 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:40:10 [  Get     ] Validating installer path...
-2026-01-25 10:40:10 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.msi
-2026-01-25 10:40:10 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 10:40:10 [  Debug   ] Launching MSI installation via msiexec.exe with arguments: /i "C:\Program Files\IntuneApps\MyApp\setup.msi" /qn /norestart
-2026-01-25 10:40:10 [  Debug   ] MSI installation process ID: 12370
-2026-01-25 10:40:10 [  Info    ] MSI installation exit code: 1603
-2026-01-25 10:40:10 [  Info    ] MSI installation returned exit code: 1603
-2026-01-25 10:40:10 [  Info    ] MSI installer process has completed. Verifying installation via registry detection...
-2026-01-25 10:40:10 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 10:40:10 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 10:40:10 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 10:40:11 [  Success ] Match found for application: 'My Application'
-2026-01-25 10:40:11 [  Success ] My Application is installed and verified in registry.
-2026-01-25 10:40:11 [  Info    ] Script execution time: 00:00:01.89
-2026-01-25 10:40:11 [  Info    ] Exit Code: 1603
-2026-01-25 10:40:11 [  End     ] ======== Script Completed ========
-```
-
-### Example 7: Installation Failure - Installer Not Found
-
-```
-2026-01-25 10:45:10 [  Start   ] ======== Script Started ========
-2026-01-25 10:45:10 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 10:45:10 [  Get     ] Validating installer path...
-2026-01-25 10:45:10 [  Error   ] Installer not found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
-2026-01-25 10:45:10 [  Info    ] Script execution time: 00:00:00.12
-2026-01-25 10:45:10 [  Info    ] Exit Code: 1
-2026-01-25 10:45:10 [  End     ] ======== Script Completed ========
-```
-
-### Example 8: Installation Failure - Application Name Not Configured (MSI)
-
-```
-2026-01-25 10:50:15 [  Start   ] ======== Script Started ========
-2026-01-25 10:50:15 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: 
-2026-01-25 10:50:15 [  Error   ] Application name is not configured. Please set `$applicationName.
-2026-01-25 10:50:15 [  Info    ] Script execution time: 00:00:00.05
-2026-01-25 10:50:15 [  Info    ] Exit Code: 1
-2026-01-25 10:50:15 [  End     ] ======== Script Completed ========
-```
-
-### Example 9: Installation Failure - Process Exception
-
-```
-2026-01-25 11:00:25 [  Start   ] ======== Script Started ========
-2026-01-25 11:00:25 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:00:25 [  Get     ] Validating installer path...
-2026-01-25 11:00:25 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
-2026-01-25 11:00:25 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 11:00:25 [  Debug   ] Launching process: 'C:\Program Files\IntuneApps\MyApp\setup.exe' with arguments: /silent
-2026-01-25 11:00:25 [  Error   ] Exception during installation: Access is denied
-2026-01-25 11:00:25 [  Debug   ] Exception details: System.UnauthorizedAccessException: Access is denied
-2026-01-25 11:00:25 [  Info    ] Script execution time: 00:00:00.45
-2026-01-25 11:00:25 [  Info    ] Exit Code: 1
-2026-01-25 11:00:25 [  End     ] ======== Script Completed ========
-```
-
-### Example 10: Installation Failure - Verification Failed After All Retries
-
-```
-2026-01-25 11:10:35 [  Start   ] ======== Script Started ========
-2026-01-25 11:10:35 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:10:35 [  Get     ] Validating installer path...
-2026-01-25 11:10:35 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.exe
-2026-01-25 11:10:35 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 11:10:35 [  Debug   ] Launching process: 'C:\Program Files\IntuneApps\MyApp\setup.exe' with arguments: /silent
-2026-01-25 11:10:35 [  Debug   ] Installer process ID: 12380
-2026-01-25 11:10:40 [  Info    ] Installer process has completed. Verifying installation via registry detection...
-2026-01-25 11:10:40 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 11:10:40 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:10:40 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:40 [  Debug   ] Found 156 subkeys under: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:41 [  Info    ] Retry attempt 2 of 3 after 5 seconds...
-2026-01-25 11:10:46 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:10:46 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:46 [  Info    ] Retry attempt 3 of 3 after 5 seconds...
-2026-01-25 11:10:51 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:10:51 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:51 [  Debug   ] Found 89 subkeys under: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:52 [  Error   ] My Application was not found in registry after 3 attempts. Installation may have failed.
-2026-01-25 11:10:52 [  Info    ] Script execution time: 00:00:17.23
-2026-01-25 11:10:52 [  Info    ] Exit Code: 1
-2026-01-25 11:10:52 [  End     ] ======== Script Completed ========
-```
-
-### Example 11: MSI Installation - Process Null but Verification Continues
-
-```
-2026-01-25 11:10:40 [  Start   ] ======== Script Started ========
-2026-01-25 11:10:40 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:10:40 [  Get     ] Validating installer path...
-2026-01-25 11:10:40 [  Success ] Installer found at path: C:\Program Files\IntuneApps\MyApp\setup.msi
-2026-01-25 11:10:40 [  Run     ] Starting installation for 'My Application'.
-2026-01-25 11:10:40 [  Debug   ] Launching MSI installation via msiexec.exe with arguments: /i "C:\Program Files\IntuneApps\MyApp\setup.msi" /qn /norestart
-2026-01-25 11:10:40 [  Error   ] Start-Process did not return a process object. MSI installation result unknown.
-2026-01-25 11:10:40 [  Info    ] MSI installer process has completed. Verifying installation via registry detection...
-2026-01-25 11:10:40 [  Info    ] Continuing to verification - installation may have succeeded despite process object being null.
-2026-01-25 11:10:40 [  Info    ] Waiting for registry keys to be populated...
-2026-01-25 11:10:40 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 11:10:40 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:10:41 [  Success ] Match found for application: 'My Application'
-2026-01-25 11:10:41 [  Success ] My Application is installed and verified in registry.
-2026-01-25 11:10:41 [  Info    ] Script execution time: 00:00:01.45
-2026-01-25 11:10:41 [  Info    ] Exit Code: 0
-2026-01-25 11:10:41 [  End     ] ======== Script Completed ========
-```
-
 ---
 
 ## 🗑️ Uninstall Script Log Examples
 
-### Example 12: Successful Uninstall - Packaged Uninstaller (EXE)
+### Example 4: Successful Uninstall - Packaged Uninstaller (EXE)
 
 ```
 2026-01-25 11:15:40 [  Start   ] ======== Script Started ========
@@ -901,7 +741,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:15:50 [  End     ] ======== Script Completed ========
 ```
 
-### Example 13: Successful Uninstall - Packaged Uninstaller (MSI)
+### Example 5: Successful Uninstall - Packaged Uninstaller (MSI)
 
 ```
 2026-01-25 11:20:45 [  Start   ] ======== Script Started ========
@@ -922,7 +762,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:20:45 [  End     ] ======== Script Completed ========
 ```
 
-### Example 14: Successful Uninstall - Registry-Based (EXE)
+### Example 6: Successful Uninstall - Registry-Based (EXE)
 
 ```
 2026-01-25 11:25:50 [  Start   ] ======== Script Started ========
@@ -950,7 +790,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:25:55 [  End     ] ======== Script Completed ========
 ```
 
-### Example 15: Successful Uninstall - Registry-Based (MSI)
+### Example 7: Successful Uninstall - Registry-Based (MSI)
 
 ```
 2026-01-25 11:30:55 [  Start   ] ======== Script Started ========
@@ -976,30 +816,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:30:55 [  End     ] ======== Script Completed ========
 ```
 
-### Example 16: Successful Uninstall with Retry Validation
-
-```
-2026-01-25 11:35:00 [  Start   ] ======== Script Started ========
-2026-01-25 11:35:00 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:35:00 [  Info    ] Using registry-based uninstall (UninstallString) for 'My Application'.
-2026-01-25 11:35:00 [  Get     ] Searching registry for application 'My Application'...
-2026-01-25 11:35:00 [  Success ] Found application 'My Application'
-2026-01-25 11:35:00 [  Run     ] Starting Registry-based uninstall process: 'C:\Program Files\MyApp\uninstall.exe' /S /uninstall /silent
-2026-01-25 11:35:00 [  Debug   ] Registry-based uninstall process ID: 12405
-2026-01-25 11:35:05 [  Info    ] Registry-based uninstall exit code: 0
-2026-01-25 11:35:05 [  Success ] My Application uninstall process completed with exit code: 0
-2026-01-25 11:35:05 [  Info    ] Performing post-uninstall validation...
-2026-01-25 11:35:05 [  Info    ] Application still present in registry (validation check 1 of 3).
-2026-01-25 11:35:10 [  Info    ] Validation check 2 of 3 after 5 seconds...
-2026-01-25 11:35:10 [  Info    ] Application still present in registry (validation check 2 of 3).
-2026-01-25 11:35:15 [  Info    ] Validation check 3 of 3 after 5 seconds...
-2026-01-25 11:35:15 [  Success ] Post-uninstall validation successful: Application removed from registry.
-2026-01-25 11:35:15 [  Info    ] Script execution time: 00:00:15.89
-2026-01-25 11:35:15 [  Info    ] Exit Code: 0
-2026-01-25 11:35:15 [  End     ] ======== Script Completed ========
-```
-
-### Example 17: Uninstall with Exit Code 3010 (Reboot Required)
+### Example 8: Uninstall with Exit Code 3010 (Reboot Required)
 
 ```
 2026-01-25 11:40:05 [  Start   ] ======== Script Started ========
@@ -1018,22 +835,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:40:05 [  End     ] ======== Script Completed ========
 ```
 
-### Example 18: Uninstall Failure - Application Not Found in Registry
-
-```
-2026-01-25 11:45:10 [  Start   ] ======== Script Started ========
-2026-01-25 11:45:10 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 11:45:10 [  Info    ] Using registry-based uninstall (UninstallString) for 'My Application'.
-2026-01-25 11:45:10 [  Get     ] Searching registry for application 'My Application'...
-2026-01-25 11:45:10 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:45:10 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 11:45:10 [  Error   ] Application 'My Application' not found in registry or UninstallString is missing.
-2026-01-25 11:45:10 [  Info    ] Script execution time: 00:00:00.45
-2026-01-25 11:45:10 [  Info    ] Exit Code: 1
-2026-01-25 11:45:10 [  End     ] ======== Script Completed ========
-```
-
-### Example 19: Uninstall Failure - Packaged Uninstaller Not Found
+### Example 9: Uninstall Failure - Packaged Uninstaller Not Found
 
 ```
 2026-01-25 11:50:15 [  Start   ] ======== Script Started ========
@@ -1046,7 +848,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:50:15 [  End     ] ======== Script Completed ========
 ```
 
-### Example 20: Uninstall Failure - Validation Failed, Fallback Successful
+### Example 10: Uninstall Failure - Validation Failed, Fallback Successful
 
 ```
 2026-01-25 11:55:20 [  Start   ] ======== Script Started ========
@@ -1081,53 +883,11 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 11:55:40 [  End     ] ======== Script Completed ========
 ```
 
-### Example 21: Uninstall Failure - Validation Failed, No Fallback Available
-
-```
-2026-01-25 12:00:25 [  Start   ] ======== Script Started ========
-2026-01-25 12:00:25 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 12:00:25 [  Info    ] Using registry-based uninstall (UninstallString) for 'My Application'.
-2026-01-25 12:00:25 [  Get     ] Searching registry for application 'My Application'...
-2026-01-25 12:00:25 [  Success ] Found application 'My Application'
-2026-01-25 12:00:25 [  Run     ] Starting Registry-based uninstall process: 'C:\Program Files\MyApp\uninstall.exe' /S
-2026-01-25 12:00:25 [  Debug   ] Registry-based uninstall process ID: 12425
-2026-01-25 12:00:30 [  Info    ] Registry-based uninstall exit code: 0
-2026-01-25 12:00:30 [  Success ] My Application uninstall process completed with exit code: 0
-2026-01-25 12:00:30 [  Info    ] Performing post-uninstall validation...
-2026-01-25 12:00:30 [  Info    ] Application still present in registry (validation check 1 of 3).
-2026-01-25 12:00:35 [  Info    ] Validation check 2 of 3 after 5 seconds...
-2026-01-25 12:00:35 [  Info    ] Application still present in registry (validation check 2 of 3).
-2026-01-25 12:00:40 [  Info    ] Validation check 3 of 3 after 5 seconds...
-2026-01-25 12:00:40 [  Info    ] Application still present in registry (validation check 3 of 3).
-2026-01-25 12:00:40 [  Error   ] Uninstall process completed but validation failed.
-2026-01-25 12:00:40 [  Info    ] Attempting fallback: Searching for alternative UninstallString...
-2026-01-25 12:00:40 [  Get     ] Searching registry for application 'My Application'...
-2026-01-25 12:00:40 [  Error   ] No alternative UninstallString found. Validation failed.
-2026-01-25 12:00:40 [  Info    ] Script execution time: 00:00:15.89
-2026-01-25 12:00:40 [  Info    ] Exit Code: 1
-2026-01-25 12:00:40 [  End     ] ======== Script Completed ========
-```
-
-### Example 22: Uninstall Failure - Unsupported Packaged Installer Extension
-
-```
-2026-01-25 12:05:30 [  Start   ] ======== Script Started ========
-2026-01-25 12:05:30 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 12:05:30 [  Info    ] Configured to use packaged installer for uninstall.
-2026-01-25 12:05:30 [  Get     ] Validating installer path...
-2026-01-25 12:05:30 [  Success ] Packaged installer found at path: C:\Program Files\IntuneApps\MyApp\setup.zip
-2026-01-25 12:05:30 [  Debug   ] Detected packaged installer extension: '.zip'
-2026-01-25 12:05:30 [  Error   ] Unsupported packaged installer extension '.zip'. Only .exe and .msi are supported.
-2026-01-25 12:05:30 [  Info    ] Script execution time: 00:00:00.34
-2026-01-25 12:05:30 [  Info    ] Exit Code: 1
-2026-01-25 12:05:30 [  End     ] ======== Script Completed ========
-```
-
 ---
 
 ## 🔍 Detection Script Log Examples
 
-### Example 23: Detection with Version Check - Success
+### Example 11: Detection with Version Check - Success
 
 ```
 2026-01-25 12:10:35 [  Start   ] ========== Detection Script ==========
@@ -1145,7 +905,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:10:36 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 24: Detection with Version Check - Wrong Version
+### Example 12: Detection with Version Check - Wrong Version
 
 ```
 2026-01-25 12:15:40 [  Start   ] ========== Detection Script ==========
@@ -1160,22 +920,7 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:15:42 [  End     ] ========== Script Completed ==========
 ```
 
-### Example 25: Detection with Version Check - Application Not Found
-
-```
-2026-01-25 12:20:45 [  Start   ] ========== Detection Script ==========
-2026-01-25 12:20:45 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 12:20:45 [  Get     ] Checking registry for application 'My Application' Version '1.9.18'.
-2026-01-25 12:20:45 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 12:20:45 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 12:20:46 [  Debug   ] Found 89 subkeys under: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 12:20:47 [  Error   ] My Application Version 1.9.18 is NOT installed.
-2026-01-25 12:20:47 [  Info    ] Script execution time: 00:00:02.34
-2026-01-25 12:20:47 [  Info    ] Exit Code: 1
-2026-01-25 12:20:47 [  End     ] ========== Script Completed ==========
-```
-
-### Example 26: Detection without Version Check - Success
+### Example 13: Detection without Version Check - Success
 
 ```
 2026-01-25 12:25:50 [  Start   ] ========== Detection Script ==========
@@ -1190,20 +935,6 @@ $enableLogFile = $true    # Enable/disable file logging
 2026-01-25 12:25:51 [  Info    ] Script execution time: 00:00:01.12
 2026-01-25 12:25:51 [  Info    ] Exit Code: 0
 2026-01-25 12:25:51 [  End     ] ========== Script Completed ==========
-```
-
-### Example 27: Detection without Version Check - Application Not Found
-
-```
-2026-01-25 12:30:55 [  Start   ] ========== Detection Script ==========
-2026-01-25 12:30:55 [  Info    ] ComputerName: DESKTOP-ABC123 | User: SYSTEM | App: My Application
-2026-01-25 12:30:55 [  Get     ] Checking registry for application 'My Application'.
-2026-01-25 12:30:55 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 12:30:55 [  Get     ] Searching in registry path: HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall
-2026-01-25 12:30:56 [  Error   ] My Application is NOT installed.
-2026-01-25 12:30:56 [  Info    ] Script execution time: 00:00:01.67
-2026-01-25 12:30:56 [  Info    ] Exit Code: 1
-2026-01-25 12:30:56 [  End     ] ========== Script Completed ==========
 ```
 
 ---
