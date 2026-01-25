@@ -4,8 +4,8 @@ $scriptStartTime = Get-Date
 # ===========================[ Configuration ]============================
 
 # Application metadata
-$applicationName    = "Global Secure Access Client"
-$applicationVersion = "1.9.18"
+$applicationName    = "__REGISTRY_DISPLAY_NAME__"
+$applicationVersion = "__REGISTRY_DISPLAY_VERSION__"
 
 # Registry paths to search for the installed application
 $registrySearchPaths = @(
@@ -73,7 +73,12 @@ function Write-Log {
     $logMessage = "$timestamp [  $rawTag ] $message"
 
     if ($enableLogFile) {
-        Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
+        try {
+            Add-Content -Path $logFile -Value $logMessage -Encoding UTF8 -ErrorAction Stop
+        }
+        catch {
+            # Logging must never block script execution - silently fail if log file is locked or inaccessible
+        }
     }
 
     Write-Host "$timestamp " -NoNewline

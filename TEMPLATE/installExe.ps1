@@ -4,14 +4,14 @@ $scriptStartTime = Get-Date
 # ===========================[ Configuration ]===================================
 
 # Script / application metadata
-$applicationName  = "Global Secure Access Client"
+$applicationName  = "__REGISTRY_DISPLAY_NAME__"
 
 # Installer configuration
-$installerName        = "GlobalSecureAccessClient.exe"
+$installerName        = "setup.exe"
 $installerPath        = Join-Path -Path $PSScriptRoot -ChildPath $installerName
 
 # EXE installer arguments
-$installerArgumentsExe = '/quiet'
+$installerArgumentsExe = '/silent'
 
 # Registry paths to search for the installed application
 $registrySearchPaths = @(

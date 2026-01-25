@@ -4,11 +4,11 @@ $scriptStartTime = Get-Date
 # ===========================[ Configuration ]===================================
 
 # Application metadata (used for logging and registry detection)
-$applicationName  = "Global Secure Access Client"
+$applicationName  = "__REGISTRY_DISPLAY_NAME__"
 
 # Installer configuration
 # MSI installer file name (must be included in the IntuneWin package)
-$installerName        = "GlobalSecureAccessClient.msi"
+$installerName        = "setup.msi"
 $installerPath        = Join-Path -Path $PSScriptRoot -ChildPath $installerName
 
 # MSI installer arguments
