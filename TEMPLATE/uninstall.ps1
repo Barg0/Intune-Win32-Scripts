@@ -474,6 +474,16 @@ function Get-ProcessedUninstallerCommand {
     if ($isMsi) {
         Write-Log "MSI-based uninstaller detected. Ensuring MSI uninstall arguments are present." -Tag "Info"
 
+        # Fix incorrect MSI switch: Replace /I (install) with /X (uninstall) if present
+        # Some registry entries incorrectly use /I instead of /X for uninstallation
+        # Match case-insensitively: /I, /i, /I{, /i{
+        if ($uninstallString -match '/[iI]\{([a-fA-F0-9\-]+)\}') {
+            $productCode = $matches[1]
+            # Replace /I or /i with /X (case-insensitive replacement)
+            $uninstallString = $uninstallString -replace '/[iI]\{' + [regex]::Escape($productCode) + '\}', "/X{$productCode}"
+            Write-Log "Corrected MSI switch from /I (install) to /X (uninstall) for product code: $productCode" -Tag "Info"
+        }
+
         # Check for any quiet flag: /qn, /quiet, /q, /norestart
         if ($uninstallString -notmatch '/(?:qn|quiet|q|norestart)(?:\s|$|/)') {
             $uninstallString += " $uninstallerArgumentsMsi"
