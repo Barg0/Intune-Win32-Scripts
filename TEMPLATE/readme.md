@@ -640,8 +640,6 @@ $enableLogFile = $true    # Enable/disable file logging
 
 ### 📋 Log Examples
 
-> **Note:** All log examples show the exact format with correct padding. Tags are padded to 7 characters: `Start` → `Start  `, `Get` → `Get    `, `Run` → `Run    `, `Info` → `Info   `, `Success` → `Success` (no padding), `Error` → `Error  `, `Debug` → `Debug  `, `End` → `End    `.
-
 ---
 
 ## 📦 Installation Script Log Examples
