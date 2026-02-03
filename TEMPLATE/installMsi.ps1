@@ -21,7 +21,7 @@ $installerPath        = Join-Path -Path $PSScriptRoot -ChildPath $installerName
 #   TRANSFORMS=file.mst = apply transform file
 #   PROPERTY=Value = set MSI property
 # Examples: "/qn /norestart", "/qn /norestart /l*v C:\Logs\install.log", "/qn TRANSFORMS=transform.mst PROPERTY=Value"
-$installerArguments = "/qn /norestart"
+$installerArguments = '/qn /norestart'
 
 # Registry paths to search for the installed application
 # Used for post-installation verification
