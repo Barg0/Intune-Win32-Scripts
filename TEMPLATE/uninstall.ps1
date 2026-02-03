@@ -17,8 +17,8 @@ $installerName                = "setup.exe"
 $installerPath                = Join-Path -Path $PSScriptRoot -ChildPath $installerName
 
 # Uninstaller arguments
-$uninstallerArgumentsExe      = "/uninstall /silent"               # For non-MSI uninstallers (packaged or registry-based)
-$uninstallerArgumentsMsi      = "/qn"                              # For MSI uninstall (msiexec /x ...)
+$uninstallerArgumentsExe      = '/uninstall /silent'               # For non-MSI uninstallers (packaged or registry-based)
+$uninstallerArgumentsMsi      = '/qn'                              # For MSI uninstall (msiexec /x ...)
 
 # Registry locations to search for uninstall entries
 # Used for: registry-based uninstall mode AND post-uninstall validation in both modes
