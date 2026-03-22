@@ -314,8 +314,7 @@ function Test-IsMsiInstaller {
     if ($filePath -and $filePath -match '\.msi$') { return $true }
     if ($argumentList -and $argumentList -match '(?:^|\s|/)[xi](?:\s|$|\{)') { return $true }
     if ($uninstallString -and $uninstallString -match '(?:^|"|\\|\s)msiexec\.exe(?:\s|"|/|$)') { return $true }
-    if ($uninstallString -and $uninstallString -match '\/[iI]\{[a-fA-F0-9\-]+\}') { return $true }
-    if ($uninstallString -and $uninstallString -match '\/[xX]\{[a-fA-F0-9\-]+\}') { return $true }
+    if ($uninstallString -and $uninstallString -match '\/[iIlLxX]\s*\{[a-fA-F0-9\-]+\}') { return $true }
     if ($uninstallString -and $uninstallString -match '\.msi(?:\s|"|$)') { return $true }
 
     return $false
@@ -509,10 +508,16 @@ function Get-ProcessedUninstallerCommand {
     if ($isMsi) {
         Write-Log "MSI-based uninstaller detected. Ensuring MSI uninstall arguments are present." -Tag "Info"
 
-        if ($uninstallString -match '/[iI]\{([a-fA-F0-9\-]+)\}') {
+        # ModifyPath often has /i or /I (install); we need /X (uninstall). Also handle /l (font/typo for I).
+        if ($uninstallString -match '/[iIlL]\s*\{([a-fA-F0-9\-]+)\}') {
             $productCode = $matches[1]
-            $uninstallString = $uninstallString -replace '/[iI]\{', '/X{'
+            $uninstallString = $uninstallString -replace '/[iIlL]\s*\{', '/X{'
             Write-Log "Corrected MSI switch from /I (install) to /X (uninstall) for product code: $productCode" -Tag "Info"
+        }
+        # MSI path format: /i "path\to\file.msi" -> /x for uninstall
+        elseif ($uninstallString -match '/[iIlL]\s+"') {
+            $uninstallString = $uninstallString -replace '/([iIlL])\s+', '/x '
+            Write-Log "Corrected MSI switch from /I (install) to /X (uninstall) for MSI path." -Tag "Info"
         }
 
         if ($uninstallString -notmatch '/(?:qn|quiet|q|norestart)(?:\s|$|/)') {
