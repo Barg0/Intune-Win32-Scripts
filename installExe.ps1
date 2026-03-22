@@ -165,33 +165,52 @@ function Test-UncPathAccess {
 }
 
 # ---------------------------[ Pending Reboot Check Function ]------------------
+# Detects reboot-pending state via registry. Scope: Windows 10/11 clients (Intune).
+# See docs/PENDING-REBOOT-RESEARCH.md for sources and MSI/EXE behavior.
 function Test-PendingReboot {
     [CmdletBinding()]
     param()
 
-    $rebootPaths = @(
+    # CBS, Windows Update, Server Manager (harmless on client)
+    $rebootKeys = @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired',
         'HKLM:\SOFTWARE\Microsoft\ServerManager\CurrentRebootAttempts'
     )
-
-    foreach ($path in $rebootPaths) {
-        if (Test-Path -Path $path) { return $true }
+    foreach ($key in $rebootKeys) {
+        if (Test-Path -Path $key) { return $true }
     }
 
+    # Session Manager: file renames/deletes scheduled for next boot (MSI, WU)
     $sessionManagerPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
     if (Test-Path -Path $sessionManagerPath) {
-        $value = Get-ItemProperty -Path $sessionManagerPath -Name 'PendingFileRenameOperations' -ErrorAction SilentlyContinue
-        if ($value -and $value.PendingFileRenameOperations) { return $true }
-        $value2 = Get-ItemProperty -Path $sessionManagerPath -Name 'PendingFileRenameOperations2' -ErrorAction SilentlyContinue
-        if ($value2 -and $value2.PendingFileRenameOperations2) { return $true }
+        $pfro = Get-ItemProperty -Path $sessionManagerPath -Name 'PendingFileRenameOperations' -ErrorAction SilentlyContinue
+        if ($pfro -and $pfro.PendingFileRenameOperations) { return $true }
+        $pfro2 = Get-ItemProperty -Path $sessionManagerPath -Name 'PendingFileRenameOperations2' -ErrorAction SilentlyContinue
+        if ($pfro2 -and $pfro2.PendingFileRenameOperations2) { return $true }
     }
 
-    $updateExePath = 'HKLM:\SOFTWARE\Microsoft\Updates'
-    if (Test-Path -Path $updateExePath) {
-        $volatile = Get-ItemProperty -Path $updateExePath -Name 'UpdateExeVolatile' -ErrorAction SilentlyContinue
-        if ($volatile -and $volatile.UpdateExeVolatile -ne 0) { return $true }
+    # UpdateExeVolatile: pending EXE modification (64-bit and 32-bit on 64-bit)
+    $updatePaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Updates',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Updates'
+    )
+    foreach ($updatePath in $updatePaths) {
+        if (Test-Path -Path $updatePath) {
+            $volatile = Get-ItemProperty -Path $updatePath -Name 'UpdateExeVolatile' -ErrorAction SilentlyContinue
+            if ($volatile -and $volatile.UpdateExeVolatile -ne 0) { return $true }
+        }
+    }
+
+    # Pending computer rename (ComputerName != ActiveComputerName)
+    $computerNamePath = 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName'
+    $activeNamePath = 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName'
+    if ((Test-Path -Path $computerNamePath) -and (Test-Path -Path $activeNamePath)) {
+        $computerName = (Get-ItemProperty -Path $computerNamePath -Name 'ComputerName' -ErrorAction SilentlyContinue).ComputerName
+        $activeName = (Get-ItemProperty -Path $activeNamePath -Name 'ComputerName' -ErrorAction SilentlyContinue).ComputerName
+        if ($computerName -and $activeName -and $computerName -ne $activeName) { return $true }
     }
 
     return $false

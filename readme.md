@@ -467,7 +467,7 @@ $startMenuShortcuts = @(
 * ✅ Launches the MSI installation via `msiexec.exe`
 * ✅ Captures process ID and exit code
 * ✅ Performs post-installation verification by checking registry (with retry logic)
-* ✅ Handles MSI exit codes (0 = success, 3010 = success with reboot required)
+* ✅ Handles MSI/EXE exit codes (0 = success, 3010 = soft reboot, 1641 = hard reboot)
 * ✅ Logs all actions (arguments, PID, exit code, verification results)
 * ✅ Exits with `0` on success (verified in registry), `1` on error
 
@@ -843,13 +843,50 @@ Fill out Name, Description, Publisher, etc.
 
 * Install behavior: `System`
 * Device restart behavior: `Determine behavior based on return codes`
-  * `0` - Success
-  * `3010` - Soft reboot
-  * `1` - Failed
+* Return codes: See [Return codes and Intune handling](#return-codes-and-intune-handling) below.
 
 ---
 
-### 3️⃣ Detection Rules 🔍
+### 3️⃣ Return Codes and Intune Handling
+
+Configure these return codes in the Win32 app: **Properties → Return codes** (add or edit as needed).
+
+| Return code | Code type in Intune | Meaning | How Intune handles it |
+|-------------|---------------------|---------|------------------------|
+| `0` | Success | Installation completed successfully (verified in registry). | App marked as installed. No restart. |
+| `1` | Failed | Installation failed, installer error, or registry verification failed. | App marked as failed. No restart. |
+| `3010` | Soft reboot | Success, but a restart is required to complete installation (common MSI code). | App marked as installed. User notified; other apps can install before restart. |
+| `1641` | Hard reboot | Success; installer initiated restart (e.g. EXE/Setup.exe). | App marked as installed. Restart required; other apps wait. User notified. |
+
+**Recommended configuration in Intune** (Program → Return codes):
+
+| Code | Type |
+|------|------|
+| 0 | Success |
+| 1 | Failed |
+| 3010 | Soft reboot |
+| 1641 | Hard reboot |
+
+#### Device restart behavior options
+
+Set in **Properties → Program → Device restart behavior**:
+
+| Option | Effect |
+|--------|--------|
+| **Determine behavior based on return codes** | Use the return code types above. Soft reboot = notify user; Hard reboot = trigger restart. Best for this framework. |
+| **App install may force a device restart** | Similar, but Hard reboot gives ~120 min grace before restart. |
+| **Intune will force a mandatory device restart** | Any success (including 0) triggers an immediate restart. |
+| **No specific action** | Suppresses restarts (MSI /qn or similar). Not recommended for apps that need reboot. |
+
+#### How the scripts map exit codes
+
+- **installExe.ps1** and **installMsi.ps1** pass through the installer exit code when verification succeeds (including 0, 3010, 1641).
+- On failure or failed verification, they exit with `1`.
+- Intune receives the script exit code and applies the matching return code type.
+
+---
+
+### 4️⃣ Detection Rules 🔍
 
 > 🧠 Remember: Detection 📜 scripts are **not** inside the `.intunewin` – you upload them separately as `detection.ps1`.
 
