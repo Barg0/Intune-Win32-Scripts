@@ -844,8 +844,8 @@ Fill out Name, Description, Publisher, etc.
 * Install behavior: `System`
 * Device restart behavior: `Determine behavior based on return codes`
   * `0` - Success
+  * `3010` - Soft reboot
   * `1` - Failed
-  * `3010` - Hard reboot
 
 ---
 
