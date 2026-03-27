@@ -27,6 +27,11 @@ $registrySearchPaths = @(
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
 )
 
+# ---------------------------[ File Check Retry Configuration ]------------------
+$fileCheckMaxRetries = 5
+$fileCheckRetryDelaySeconds = 30
+
+# ---------------------------[ Wildcard Matching Configuration ]-----------------
 $useWildcardMatching = $applicationName.Contains('*') -or $applicationName.Contains('?') -or $applicationName.Contains('[') -or $applicationName.Contains(']')
 $applicationNameClean = if ($useWildcardMatching) { $applicationName -replace '[\*\?\[\]]', '' } else {
     $applicationName
@@ -154,6 +159,32 @@ function Test-UncPathAccess {
         Write-Log "UNC authentication failed: $($_.Exception.Message)" -Tag "Error"
         return $false
     }
+}
+
+# ---------------------------[ File Path Retry Check Function ]-------------------
+function Test-PathWithRetry {
+    [CmdletBinding()]
+    param(
+        [string]$path,
+        [int]$maxRetries = 5,
+        [int]$retryDelaySeconds = 30
+    )
+
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        if (Test-Path -Path $path) {
+            if ($attempt -gt 1) {
+                Write-Log "Path became available on attempt $attempt of ${maxRetries}: $path" -Tag "Success"
+            }
+            return $true
+        }
+
+        if ($attempt -lt $maxRetries) {
+            Write-Log "Path not found (attempt $attempt of $maxRetries): $path. Retrying in $retryDelaySeconds seconds..." -Tag "Info"
+            Start-Sleep -Seconds $retryDelaySeconds
+        }
+    }
+
+    return $false
 }
 
 # ---------------------------[ Registry Check Function ]-----------------------
@@ -564,7 +595,7 @@ function Get-ProcessedUninstallerCommand {
 
     if ($uninstallerPath -match '\.msi$') {
         $uninstallerPath = [System.Environment]::ExpandEnvironmentVariables($uninstallerPath)
-        if (-not (Test-Path -Path $uninstallerPath)) {
+        if (-not (Test-PathWithRetry -path $uninstallerPath -maxRetries $fileCheckMaxRetries -retryDelaySeconds $fileCheckRetryDelaySeconds)) {
             Write-Log "MSI file not found at path: $uninstallerPath" -Tag "Error"
             return $null
         }
@@ -577,7 +608,7 @@ function Get-ProcessedUninstallerCommand {
         $uninstallerPath = [System.Environment]::ExpandEnvironmentVariables($uninstallerPath)
         $uninstallerPath = Resolve-SystemExecutable -ExecutableName $uninstallerPath
 
-        if (-not (Test-Path -Path $uninstallerPath)) {
+        if (-not (Test-PathWithRetry -path $uninstallerPath -maxRetries $fileCheckMaxRetries -retryDelaySeconds $fileCheckRetryDelaySeconds)) {
             Write-Log "Uninstaller executable not found at path: $uninstallerPath" -Tag "Error"
             return $null
         }
@@ -781,7 +812,7 @@ if ($usePackagedUninstaller) {
         Complete-Script -exitCode 1
     }
 
-    if (-not (Test-Path -Path $installerPath)) {
+    if (-not (Test-PathWithRetry -path $installerPath -maxRetries $fileCheckMaxRetries -retryDelaySeconds $fileCheckRetryDelaySeconds)) {
         Write-Log "Packaged installer not found at path: $installerPath" -Tag "Error"
         Complete-Script -exitCode 1
     }
