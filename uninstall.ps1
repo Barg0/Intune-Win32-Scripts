@@ -244,7 +244,7 @@ function Test-PostUninstallValidation {
         }
         $applicationRemoved = -not (Test-ApplicationInRegistry -applicationName $applicationName -registryPaths $registryPaths -suppressLogging -useWildcardMatching $useWildcardMatching)
         if ($applicationRemoved) {
-            Write-Log "Missiing from reg." -Tag "Success"
+            Write-Log "Missing from reg." -Tag "Success"
             return $true
         }
         Write-Log "Still in reg (${attempt}/${maxRetries})." -Tag "Info"

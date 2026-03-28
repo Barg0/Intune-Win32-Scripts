@@ -3,7 +3,7 @@
 This repository provides a **reusable, configurable, and standardized PowerShell deployment framework** for packaging, installing, uninstalling, and detecting Win32 applications in **Microsoft Intune**. 🎯
 
 ✅ Supports **EXE & MSI installers**
-✅ Unified **logging** with multiple log levels
+✅ **Logging** to console and under ProgramData (tunable per script)
 ✅ Registry **or** packaged uninstaller support
 ✅ Post-installation verification via registry detection
 ✅ Comprehensive error handling and retry logic
@@ -54,15 +54,36 @@ You can deploy **any Win32 application** by modifying just a few variables at th
 
 Silently installs an EXE or MSI included inside the Intune Win32 package with automatic post-installation verification.
 
+### `$applicationVersion` in the install scripts (`installExe.ps1` / `installMsi.ps1`)
+
+Use the same **exact** `DisplayVersion` string as in the uninstall registry (align it with `detectionWithVersionCheck.ps1` when you use that for Intune detection). The scripts do **not** parse semver or decide “newer/older”—only string equality.
+
+**1. Before install** (installer file found; registry queried first):
+
+| `$applicationVersion` | What happens |
+| --------------------- | ------------ |
+| **Non-empty** | If a matching uninstall row already has this `DisplayName` + `DisplayVersion`, the script **exits `0` and does not run setup**. If `$createShortcuts` is `$true`, shortcuts are still processed before exit. |
+| **Empty** (`""`) | Setup **always runs** (no skip). If the name is already registered, the script logs the existing `DisplayVersion` and continues. |
+
+**2. After install** (verification with retries):
+
+| `$applicationVersion` | Success means |
+| --------------------- | ------------- |
+| **Non-empty** | A row matches `$applicationName` **and** `DisplayVersion` equals `$applicationVersion`. |
+| **Empty** (`""`) | A row matches `$applicationName` only (`DisplayVersion` ignored). |
+
+Wildcards in `$applicationName` use the same rules as uninstall/detection (`-like` when the pattern contains wildcard characters). Prefer an **exact** `DisplayName` if you rely on the “already installed → skip” path.
+
 ### 📜 `installExe.ps1` - EXE Installer Script
 
-#### 🔧 Configuration (top of script)
+#### 🔧 Parameters (top of `installExe.ps1`)
 
-All variables are at the top of the script. Configure before packaging.
+Edit the **Configuration**, **UNC Path & Authentication**, and **Logging** sections at the top of the script. Typical values are shown in the **Configuration examples** below.
 
 | Variable | Purpose |
 | -------- | ------- |
 | `$applicationName` | Exact registry `DisplayName` for verification and detection. Must match post-install. |
+| `$applicationVersion` | Optional. See **`$applicationVersion` in the install scripts** above (skip-before-install + post-install verification). |
 | `$installerName` | Filename of your EXE (e.g. `setup.exe`). Must be in same folder as script. |
 | `$installerArgumentsExe` | Arguments passed to the EXE. See below for common values. |
 | `$createShortcuts` | `$true` to create shortcuts after install; `$false` to skip. |
@@ -77,7 +98,7 @@ All variables are at the top of the script. Configure before packaging.
 | -------- | ------- |
 | `$installerPathOverride` | UNC root only (e.g. `\\server\software`). When set, path = `$installerPathOverride` + `$installerName`. |
 | `$useUncAuth` | `$true` to use credentials when UNC access fails without auth. |
-| `$uncCredential` | `[PSCredential]` for UNC auth (use `[PSCredential]::new("user@domain.tld", (ConvertTo-SecureString "password" -AsPlainText -Force))`). |
+| `$uncCredential` | `[PSCredential]` for UNC auth. Example below—note the **two** closing `)` at the end (one ends `ConvertTo-SecureString`, one ends `::new`). Requires **PowerShell 7+** (`pwsh`) for `-AsPlainText -Force`. |
 
 > `$installerPath` is computed: if `$installerPathOverride` is set → UNC root + `$installerName`; else → script folder + `$installerName`.
 
@@ -94,6 +115,7 @@ All variables are at the top of the script. Configure before packaging.
 
 ```powershell
 $applicationName       = "7-Zip 24.08"
+$applicationVersion    = ""
 $installerName         = "7z2408-x64.exe"
 $installerArgumentsExe = '/S'
 $createShortcuts       = $false
@@ -105,6 +127,7 @@ $startMenuShortcuts    = @()
 
 ```powershell
 $applicationName       = "My Application"
+$applicationVersion    = ""
 $installerName         = "MyAppSetup.exe"
 $installerArgumentsExe = '/silent'
 $createShortcuts       = $true
@@ -120,6 +143,7 @@ $startMenuShortcuts    = @(
 
 ```powershell
 $applicationName       = "Vendor App"
+$applicationVersion    = ""
 $installerName         = "VendorSetup.exe"
 $installerArgumentsExe = '/s /v"/qn /norestart"'
 $createShortcuts       = $false
@@ -131,6 +155,7 @@ $startMenuShortcuts    = @()
 
 ```powershell
 $applicationName       = "innovaphone myApps*"
+$applicationVersion    = ""
 $installerName         = "myApps-1510655.exe"
 $installerArgumentsExe = '/silent'
 $createShortcuts       = $false
@@ -144,6 +169,7 @@ Some installers read silent switches from a `.ini` or config file in the same fo
 
 ```powershell
 $applicationName       = "My Application"
+$applicationVersion    = ""
 $installerName         = "setup.exe"
 $installerArgumentsExe = ""   # No args – installer reads silent config from .ini
 $createShortcuts       = $false
@@ -155,8 +181,9 @@ $startMenuShortcuts    = @()
 
 ```powershell
 $applicationName       = "My Application"
+$applicationVersion    = ""
 $installerName         = "installer.exe"   # always used – appended to UNC root
-$installerArgumentsExe = "/silent"
+$installerArgumentsExe = '/silent'
 $createShortcuts       = $false
 $desktopShortcuts      = @()
 $startMenuShortcuts    = @()
@@ -166,6 +193,8 @@ $installerPathOverride = "\\server01.domain.tld\software"   # UNC root only
 $useUncAuth           = $true
 $uncCredential        = [PSCredential]::new("svc.intune-install@domain.tld", (ConvertTo-SecureString "YourSecurePassword" -AsPlainText -Force))
 ```
+
+> **Syntax:** `[PSCredential]::new("user", (ConvertTo-SecureString "pass" -AsPlainText -Force))` must end with `))`. A single `)` causes a parser error. Use straight ASCII `"` quotes, not “smart” quotes.
 
 > Result: `$installerPath` = `\\server01.domain.tld\software\installer.exe`. The script tries access without auth first (works for domain-joined); if that fails, uses `net use` with the provided credentials.
 
@@ -230,9 +259,9 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 > 
 > **Note:** When using wildcards, the script uses PowerShell's `-like` operator for matching instead of exact matching (`-eq`). This feature works in all scripts (install, uninstall, and detection).
 
-**`$applicationVersion` - Registry DisplayVersion (for detection scripts with version check)**
+**`$applicationVersion` - Registry DisplayVersion (optional)**
 
-If using `detectionWithVersionCheck.ps1`, you also need to set `$applicationVersion` to match the **exact `DisplayVersion`** value from the registry.
+Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` only uses `$applicationName` (and wildcards); post-uninstall validation checks that the matching display name is no longer in the uninstall registry.
 
 **How to find the DisplayVersion:**
 
@@ -260,41 +289,43 @@ $applicationVersion = "1.85.1"
 #### 🤖 Behavior
 
 * ✅ Verifies that the installer 📄 exists at `$installerPath`
+* ✅ **Registry check before install** and **verification after install**—see **`$applicationVersion` in the install scripts**
 * ✅ Launches the EXE installer with specified arguments
 * ✅ Captures process ID and exit code
 * ✅ Performs post-installation verification by checking registry (with retry logic)
-* ✅ Logs all actions (arguments, PID, exit code, verification results)
-* ✅ Exits with `0` on success (verified in registry), `1` on error
+* ✅ Writes logs via `Write-Log` when enabled (see **Logging & Diagnostics**)
+* ✅ Exits with `0` on success (verified in registry or skipped as already present), `1` on error
 
 #### 📁 Log Location
 
+Log directory uses `$scriptName` in the script (same as `$applicationNameClean`: wildcards stripped for the folder name).
+
 ```text
-C:\ProgramData\IntuneLogs\Applications\<applicationName>\install.log
+C:\ProgramData\IntuneLogs\Applications\<scriptName>\install.log
 ```
 
 ---
 
 ### 📜 `installMsi.ps1` - MSI Installer Script
 
-#### 🔧 Configuration (top of script)
+#### 🔧 Parameters (top of `installMsi.ps1`)
 
-```powershell
-$applicationName  = "__REGISTRY_DISPLAY_NAME__"
-$installerName    = "setup.msi"
+Same idea as `installExe.ps1`: **Configuration**, **UNC**, **Logging**, plus MSI-specific `$installerArguments`. **`$applicationVersion`** behaves the same as in **`$applicationVersion` in the install scripts** (EXE section above).
 
-# MSI installer arguments - /i and path are added automatically
-$installerArguments = "/qn /norestart"
+| Variable | Purpose |
+| -------- | ------- |
+| `$applicationName` | Registry `DisplayName` for verification (wildcards supported; see Configuration Guide). |
+| `$applicationVersion` | Optional; skip-before-install + post-install rules—see **`$applicationVersion` in the install scripts**. |
+| `$installerName` | Filename of the `.msi` next to the script (or on UNC). |
+| `$installerArguments` | Arguments for `msiexec` **after** `/i` and the MSI path (e.g. `'/qn /norestart'`). Do **not** put `/i` or the `.msi` path here—the script adds them. |
+| `$createShortcuts`, `$desktopShortcuts`, `$startMenuShortcuts` | Same shortcut behavior as `installExe.ps1`. |
+| `$installerPathOverride`, `$useUncAuth`, `$uncCredential` | Optional UNC (same as EXE). |
+| `$registrySearchPaths` | Where to look for the app after install (defaults cover 64- and 32-bit uninstall hives). |
+| `$log`, `$logDebug`, `$logGet`, `$logRun`, `$enableLogFile` | Logging switches—see **Logging & Diagnostics**. |
 
-# Registry paths to search for the installed application
-$registrySearchPaths = @(
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-)
-```
+**`$installerArguments` examples:** `'/qn'`, `'/qn /norestart'`, `'/qn /l*v "C:\path\msi.log"'`.
 
-**`$installerArguments` – MSI examples:** `/qn` (quiet), `/qn /norestart`, `/qn /l*v C:\Logs\app.log`. Never add `/i` or the MSI path; the script supplies them.
-
-> `$installerPath` is computed: if `$installerPathOverride` is set → UNC root + `$installerName`; else → script folder + `$installerName`. UNC vars are in the UNC Path & Authentication section.
+> `$installerPath` is UNC root + `$installerName` when `$installerPathOverride` is set; otherwise the script folder + `$installerName`.
 
 #### 📋 Configuration examples
 
@@ -302,8 +333,9 @@ $registrySearchPaths = @(
 
 ```powershell
 $applicationName     = "Microsoft Visual Studio Code"
+$applicationVersion  = "1.85.1"
 $installerName       = "VSCodeUserSetup-x64-1.85.1.msi"
-$installerArguments  = "/qn /norestart"
+$installerArguments  = '/qn /norestart'
 $createShortcuts     = $false
 $desktopShortcuts    = @()
 $startMenuShortcuts  = @()
@@ -313,8 +345,9 @@ $startMenuShortcuts  = @()
 
 ```powershell
 $applicationName     = "My Application"
+$applicationVersion  = ""
 $installerName       = "MyApp-2.1.0.msi"
-$installerArguments  = "/qn /norestart"
+$installerArguments  = '/qn /norestart'
 $createShortcuts     = $true
 $desktopShortcuts    = @(
     @{ Name = "My Application"; TargetPath = "$env:ProgramFiles\MyApp\myapp.exe" }
@@ -328,6 +361,7 @@ $startMenuShortcuts  = @(
 
 ```powershell
 $applicationName     = "My Application"
+$applicationVersion  = ""
 $installerName       = "MyApp-2.1.0.msi"
 $installerArguments  = '/qn /norestart /l*v "C:\ProgramData\IntuneLogs\Applications\My Application\msi-install.log"'
 $createShortcuts     = $false
@@ -339,8 +373,9 @@ $startMenuShortcuts  = @()
 
 ```powershell
 $applicationName     = "My Application"
+$applicationVersion  = ""
 $installerName       = "MyApp-2.1.0.msi"
-$installerArguments  = "/qn /norestart"
+$installerArguments  = '/qn /norestart'
 $createShortcuts     = $false
 $desktopShortcuts    = @()
 $startMenuShortcuts  = @()
@@ -350,6 +385,8 @@ $installerPathOverride = "\\server01.domain.tld\software"
 $useUncAuth           = $true
 $uncCredential        = [PSCredential]::new("svc.intune-install@domain.tld", (ConvertTo-SecureString "YourSecurePassword" -AsPlainText -Force))
 ```
+
+> **UNC credential:** Same `))` closing parentheses and PowerShell 7+ requirement as in the EXE **Scenario E** example above.
 
 #### 📝 Configuration Guide
 
@@ -412,9 +449,9 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 > 
 > **Note:** When using wildcards, the script uses PowerShell's `-like` operator for matching instead of exact matching (`-eq`). This feature works in all scripts (install, uninstall, and detection).
 
-**`$applicationVersion` - Registry DisplayVersion (for detection scripts with version check)**
+**`$applicationVersion` - Registry DisplayVersion (optional)**
 
-If using `detectionWithVersionCheck.ps1`, you also need to set `$applicationVersion` to match the **exact `DisplayVersion`** value from the registry.
+Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` only uses `$applicationName` (and wildcards); post-uninstall validation checks that the matching display name is no longer in the uninstall registry.
 
 **How to find the DisplayVersion:**
 
@@ -463,18 +500,21 @@ $startMenuShortcuts = @(
 #### 🤖 Behavior
 
 * ✅ Verifies that the MSI installer 📄 exists at `$installerPath`
+* ✅ **Registry check before install** and **verification after install** (same rules as EXE)—see **`$applicationVersion` in the install scripts**
 * ✅ Constructs MSI command: `msiexec.exe /i "<path>" $installerArguments`
 * ✅ Launches the MSI installation via `msiexec.exe`
 * ✅ Captures process ID and exit code
 * ✅ Performs post-installation verification by checking registry (with retry logic)
-* ✅ Handles MSI/EXE exit codes (0 = success, 3010 = soft reboot, 1641 = hard reboot)
-* ✅ Logs all actions (arguments, PID, exit code, verification results)
-* ✅ Exits with `0` on success (verified in registry), `1` on error
+* ✅ Handles MSI exit codes (0 = success, 3010 / 1641 = reboot-related success)
+* ✅ Writes logs via `Write-Log` when enabled (see **Logging & Diagnostics**)
+* ✅ Exits with `0` on success (verified in registry or skipped as already present), `1` on error
 
 #### 📁 Log Location
 
+Same as EXE: folder name is `$scriptName` / `$applicationNameClean` in the script.
+
 ```text
-C:\ProgramData\IntuneLogs\Applications\<applicationName>\install.log
+C:\ProgramData\IntuneLogs\Applications\<scriptName>\install.log
 ```
 
 ---
@@ -490,40 +530,13 @@ Uninstalls the application using either:
 
 Includes automatic post-uninstall validation and fallback mechanisms.
 
-### 🔧 Configuration (top of script)
+### 🔧 Parameters (top of `uninstall.ps1`)
 
-```powershell
-$applicationName = "__REGISTRY_DISPLAY_NAME__"
-
-# Wildcard support: If $applicationName contains *, use wildcard matching in registry searches
-# The clean name (without *) is used for log paths and folder names
-# Example: "innovaphone myApps*" will match "innovaphone myApps 1510655" and logs will be saved to "innovaphone myApps\"
-
-# Mode selection
-$usePackagedUninstaller = $false   # $true = packaged uninstaller, $false = registry-based
-
-# Packaged uninstaller configuration (used only when $usePackagedUninstaller = $true)
-$installerName = "setup.exe"           # or .msi
-
-# UNC Path & Authentication (optional – when packaged uninstaller is on network share)
-$installerPathOverride = ""   # UNC root only, e.g. "\\server01.domain.tld\software"
-$useUncAuth           = $false
-$uncCredential        = $null   # [PSCredential] when $useUncAuth = $true
-
-# Uninstaller arguments
-$uninstallerArgumentsExe = "/uninstall /silent"               # For non-MSI uninstallers
-$uninstallerArgumentsMsi = "/qn"                              # For MSI uninstall (msiexec /x ...)
-
-# Registry locations to search for uninstall entries
-$registrySearchPaths = @(
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-)
-```
+There is **no** `$applicationVersion` in uninstall: validation only checks that the **DisplayName** (with the same wildcard rules as install) no longer appears under `$registrySearchPaths`. File retries, wildcard handling, and logging use the defaults in the script unless you change them.
 
 | Variable | Purpose |
 | -------- | ------- |
-| `$applicationName` | Exact registry `DisplayName` for lookup. Supports wildcards (`*`, `?`, `[`, `]`). |
+| `$applicationName` | Registry `DisplayName` for lookup and post-uninstall check. Supports wildcards (`*`, `?`, `[`, `]`). |
 | `$usePackagedUninstaller` | `$true` = use packaged EXE/MSI; `$false` = use registry `UninstallString`/`ModifyPath`. |
 | `$installerName` | Filename of packaged uninstaller (used only when `$usePackagedUninstaller = $true`). |
 | `$uninstallerArgumentsExe` | Arguments for non-MSI uninstallers (e.g. `/uninstall /silent`). |
@@ -543,8 +556,8 @@ $registrySearchPaths = @(
 $applicationName         = "My Application"
 $usePackagedUninstaller  = $true
 $installerName           = "MyAppSetup.exe"
-$uninstallerArgumentsExe = "/uninstall /silent"
-$uninstallerArgumentsMsi = "/qn"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
 ```
 
 **Scenario B: Packaged MSI uninstaller** (same MSI used for install and uninstall via msiexec /x)
@@ -553,8 +566,8 @@ $uninstallerArgumentsMsi = "/qn"
 $applicationName         = "My Application"
 $usePackagedUninstaller  = $true
 $installerName           = "MyApp-2.1.0.msi"
-$uninstallerArgumentsExe = "/uninstall /silent"
-$uninstallerArgumentsMsi = "/qn"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
 ```
 
 **Scenario C: Registry-based uninstall** (script finds UninstallString from registry; no packaged uninstaller)
@@ -563,8 +576,8 @@ $uninstallerArgumentsMsi = "/qn"
 $applicationName         = "My Application"
 $usePackagedUninstaller  = $false
 $installerName           = "setup.exe"
-$uninstallerArgumentsExe = "/uninstall /silent"
-$uninstallerArgumentsMsi = "/qn"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
 ```
 
 **Scenario D: Registry-based with wildcard DisplayName**
@@ -573,8 +586,8 @@ $uninstallerArgumentsMsi = "/qn"
 $applicationName         = "innovaphone myApps*"
 $usePackagedUninstaller  = $false
 $installerName           = "setup.exe"
-$uninstallerArgumentsExe = "/uninstall /silent"
-$uninstallerArgumentsMsi = "/qn"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
 ```
 
 **Scenario E: Packaged uninstaller on UNC share**
@@ -583,14 +596,16 @@ $uninstallerArgumentsMsi = "/qn"
 $applicationName         = "My Application"
 $usePackagedUninstaller  = $true
 $installerName           = "uninstall.exe"
-$uninstallerArgumentsExe = "/uninstall /silent"
-$uninstallerArgumentsMsi = "/qn"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
 
 # UNC section
 $installerPathOverride = "\\server01.domain.tld\software"
 $useUncAuth           = $true
 $uncCredential        = [PSCredential]::new("svc.intune-install@domain.tld", (ConvertTo-SecureString "YourSecurePassword" -AsPlainText -Force))
 ```
+
+> **UNC credential:** Line must end with `))`; use PowerShell 7+ for `-AsPlainText -Force` (see **Install Issues** troubleshooting).
 
 ### ✅ Mode A — Packaged Uninstaller (`$usePackagedUninstaller = $true`)
 
@@ -611,14 +626,14 @@ $uncCredential        = [PSCredential]::new("svc.intune-install@domain.tld", (Co
 * 🧠 If MSI → ensures `/qn` or `$uninstallerArgumentsMsi` is present
 * 🧠 If non-MSI → appends `$uninstallerArgumentsExe` (avoiding duplicates)
 * ▶️ Executes the uninstaller via `Start-Process`
-* ✅ Performs post-uninstall validation (checks registry with retries)
+* ✅ Performs post-uninstall validation (checks registry with retries). On success the script logs **`Missing from reg.`**
 * 🔄 Fallback: if validation fails, searches for another `UninstallString` for the same app and retries once
 * 🚪 Exits with `0` on success (verified removal), `1` on error
 
 ### 📁 Log Location
 
 ```text
-C:\ProgramData\IntuneLogs\Applications\<applicationName>\uninstall.log
+C:\ProgramData\IntuneLogs\Applications\<scriptName>\uninstall.log
 ```
 
 ---
@@ -635,17 +650,9 @@ These 📜 scripts are used **only** for Intune detection rules and are **not** 
 
 Detects whether a specific **DisplayName + DisplayVersion** combination is present in the uninstall registry keys.
 
-#### 🔧 Configuration
+#### 🔧 Parameters (top of `detectionWithVersionCheck.ps1`)
 
-```powershell
-$applicationName    = "__REGISTRY_DISPLAY_NAME__"
-$applicationVersion = "__REGISTRY_DISPLAY_VERSION__"   # e.g. "1.9.18"
-
-$registrySearchPaths = @(
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-)
-```
+Set the placeholders and optional `$registrySearchPaths`. Logging switches match the other scripts.
 
 | Variable | Purpose |
 | -------- | ------- |
@@ -682,15 +689,11 @@ $registrySearchPaths = @(
 
 #### 🤖 Logic
 
-* Loops over all 📁 subkeys under each `$registrySearchPaths` entry
-* Reads `DisplayName` and `DisplayVersion` for each key
-* Uses wildcard matching (`-like`) if `$applicationName` contains wildcard characters, otherwise exact matching (`-eq`)
-* When both match:
-  * ✅ Logs a success entry
-  * ✅ Calls `Complete-Script -exitCode 0`
-* If no match is found:
-  * ❌ Logs error
-  * ❌ Calls `Complete-Script -exitCode 1`
+* Scans uninstall subkeys under each path in `$registrySearchPaths`
+* Matches `DisplayName` to `$applicationName` (wildcard `-like` when the name contains `*`, `?`, or `[` / `]`, otherwise `-eq`) and `DisplayVersion` to `$applicationVersion` (exact)
+* **Installed:** `Complete-Script -exitCode 0`
+* **Not installed:** `Complete-Script -exitCode 1`
+* Extra registry scan detail is emitted only when `$logDebug = $true`
 
 #### 📌 Use When
 
@@ -705,16 +708,9 @@ $registrySearchPaths = @(
 
 Detects whether the application is installed based only on `DisplayName`.
 
-#### 🔧 Configuration
+#### 🔧 Parameters (top of `detectionWithoutVersionCheck.ps1`)
 
-```powershell
-$applicationName = "__REGISTRY_DISPLAY_NAME__"
-
-$registrySearchPaths = @(
-    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-)
-```
+Only `$applicationName` and optionally `$registrySearchPaths` (and logging) need tuning for most apps.
 
 | Variable | Purpose |
 | -------- | ------- |
@@ -748,15 +744,11 @@ $registrySearchPaths = @(
 
 #### 🤖 Logic
 
-* Loops over uninstall registry keys
-* Reads `DisplayName`
-* Uses wildcard matching (`-like`) if `$applicationName` contains wildcard characters, otherwise exact matching (`-eq`)
-* When `DisplayName` matches `$applicationName`:
-  * ✅ Logs success
-  * ✅ Exits with `0`
-* Otherwise:
-  * ❌ Logs error
-  * ❌ Exits with `1`
+* Scans uninstall subkeys under each path in `$registrySearchPaths`
+* Matches `DisplayName` to `$applicationName` (wildcard `-like` when the name contains wildcard characters, otherwise `-eq`); any `DisplayVersion` is ignored for the decision
+* **Installed:** exit code `0`
+* **Not installed:** exit code `1`
+* Per-hive detail is **Debug** only when `$logDebug = $true`
 
 #### 📌 Use When
 
@@ -958,58 +950,31 @@ This lets you confirm that the scripts behave correctly when executed exactly li
 
 ## 🪵 Logging & Diagnostics
 
-All scripts share the same logging behavior and target the same 📁 log directory.
+Each script defines **`Write-Log`** and writes optional **UTF-8** log files under:
 
-### 📄 Script Log Files
+`$env:ProgramData\IntuneLogs\Applications\$scriptName`
 
-> [!TIP]
-> The **📄 Log files** for all scripts are saved at:
-> `C:\ProgramData\IntuneLogs\Applications\$applicationName\`
->
-> ```
-> C:  
-> ├─📁 ProgramData
-> │  └─📁 IntuneLogs
-> │     └─📁 Applications
-> │        └─📁 $applicationName
-> │           ├─📄 detection.log
-> │           ├─📄 install.log
-> │           └─📄 uninstall.log
-> ```
-> To enable log collection from this custom directory using the **Collect diagnostics** feature in Intune, deploy the following platform script:
->
-> [**📜 Diagnostics - Custom Log File Directory**](https://github.com/Barg0/Intune-Platform-Scripts/tree/main/Diagnostics%20-%20Custom%20Log%20File%20Directory)
+`$scriptName` is `$applicationNameClean` (wildcard characters stripped from `$applicationName` for the folder name).
 
-### 📁 Script Logs (per app)
+| After rename | Log file |
+| ------------ | -------- |
+| `install.ps1` | `install.log` |
+| `uninstall.ps1` | `uninstall.log` |
+| `detection.ps1` | `detection.log` |
 
-* `install.ps1`   → `install.log`
-* `uninstall.ps1` → `uninstall.log`
-* `detection.ps1` → `detection.log`
+To collect that folder with Intune **Collect diagnostics**, you can use: [**Diagnostics - Custom Log File Directory**](https://github.com/Barg0/Intune-Platform-Scripts/tree/main/Diagnostics%20-%20Custom%20Log%20File%20Directory).
 
-### 🏷️ Log Tags
-
-All scripts use a unified logging system with the following tags:
-
-* `[Start  ]` - Script initialization
-* `[Get    ]` - Registry queries and file system checks
-* `[Run    ]` - Process execution (installer/uninstaller launches)
-* `[Info   ]` - General information messages
-* `[Success]` - Successful operations
-* `[Error  ]` - Errors and failures
-* `[Debug  ]` - Detailed debugging information (controlled by `$logDebug`)
-* `[End    ]` - Script completion
-
-### 📝 Log Configuration
-
-Each script includes logging configuration variables at the top:
+### 📝 Log switches (same names in each script)
 
 ```powershell
-$log           = $true    # Master switch for all logging
-$logDebug      = $false   # Set to $true to show DEBUG logs
-$logGet        = $true    # Enable/disable all [Get] logs (registry searches)
-$logRun        = $true    # Enable/disable all [Run] logs (process execution)
-$enableLogFile = $true    # Enable/disable file logging
+$log              = $true
+$logDebug         = $false
+$logGet           = $true
+$logRun           = $true
+$enableLogFile    = $true
 ```
+
+`$log` disables all logging. `$logDebug`, `$logGet`, and `$logRun` filter message categories inside `Write-Log`. Set `$enableLogFile = $false` to keep console output only.
 
 
 ## 🌟 Wildcard Support Feature
@@ -1052,7 +1017,7 @@ This ensures clean folder names without special characters.
 ### 🔍 Where It Works
 
 Wildcard support is available in **all scripts**:
-* ✅ `installExe.ps1` / `installMsi.ps1` - Post-installation verification
+* ✅ `installExe.ps1` / `installMsi.ps1` - Skip-before-install when version is set, post-install verification, name-only path when version is empty (see **`$applicationVersion` in the install scripts**)
 * ✅ `uninstall.ps1` - Registry lookup and validation
 * ✅ `detectionWithVersionCheck.ps1` - DisplayName matching (version still requires exact match)
 * ✅ `detectionWithoutVersionCheck.ps1` - DisplayName matching
@@ -1081,6 +1046,7 @@ Wildcard support is available in **all scripts**:
 
 * Double-check installer arguments (`/quiet`, `/qn`, `/silent`)
 * Verify the installer file name matches `$installerName` exactly
+* **`[PSCredential]::new` parse error:** ensure the line ends with **`))`** (one `)` closes `ConvertTo-SecureString`, one closes `::new`). Use **PowerShell 7+** for `ConvertTo-SecureString -AsPlainText -Force`.
 * Turn on debug logging: set `$logDebug = $true` in the configuration section
 * Run the installer manually with the same arguments to see vendor errors
 * Check the registry manually to confirm the `DisplayName` matches `$applicationName` exactly
@@ -1105,7 +1071,7 @@ Wildcard support is available in **all scripts**:
 
 ### ⚠️ Logging Issues
 
-* Ensure the log directory path is accessible: `C:\ProgramData\IntuneLogs\Applications\<applicationName>\`
+* Ensure the log directory path is accessible: `C:\ProgramData\IntuneLogs\Applications\<scriptName>\` (same folder name the script derives from `$applicationName`)
 * Check file permissions - scripts run as SYSTEM, so SYSTEM must have write access
 * If logs aren't appearing, set `$enableLogFile = $true` and verify `$log = $true`
 * Enable debug logging by setting `$logDebug = $true` for more detailed information

@@ -3,8 +3,7 @@ $scriptStartTime = Get-Date
 
 # ---------------------------[ Configuration ]------------------------------
 $applicationName     = "__REGISTRY_DISPLAY_NAME__"
-# Optional. Exact DisplayVersion string (same as detectionWithVersionCheck). When set with $applicationName: script exits 0 before install if uninstall registry already has that exact DisplayName + DisplayVersion; otherwise installation runs. When empty (name-only): no early exit; if the display name is already registered, we log DisplayVersion and still run the installer. Wildcards in $applicationName use the same matching rules as Test-ApplicationInstalled (first matching uninstall subkey wins).
-$applicationVersion  = ""
+$applicationVersion    = "" # Optional. Exact DisplayVersion string (same as detectionWithVersionCheck). When set with $applicationName: script exits 0 before install if uninstall registry already has that exact DisplayName + DisplayVersion; otherwise installation runs. When empty (name-only): no early exit; if the display name is already registered, we log DisplayVersion and still run the installer. Wildcards in $applicationName use the same matching rules as Test-ApplicationInstalled (first matching uninstall subkey wins).
 $installerName       = "setup.msi"
 $installerArguments  = '/qn /norestart'
 
