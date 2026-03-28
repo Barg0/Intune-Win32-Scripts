@@ -3,6 +3,8 @@ $scriptStartTime = Get-Date
 
 # ---------------------------[ Configuration ]------------------------------
 $applicationName     = "__REGISTRY_DISPLAY_NAME__"
+# Optional. Exact DisplayVersion string (same as detectionWithVersionCheck). When set with $applicationName: script exits 0 before install if uninstall registry already has that exact DisplayName + DisplayVersion; otherwise installation runs. When empty (name-only): no early exit; if the display name is already registered, we log DisplayVersion and still run the installer. Wildcards in $applicationName use the same matching rules as Test-ApplicationInstalled (first matching uninstall subkey wins).
+$applicationVersion  = ""
 $installerName       = "setup.msi"
 $installerArguments  = '/qn /norestart'
 
@@ -20,7 +22,7 @@ $startMenuShortcuts = @(
 # Optional: Use when installer is on a network share (Entra-joined devices need creds)
 $installerPathOverride = ""   # UNC root only, e.g. "\\server01.domain.tld\software"
 $useUncAuth           = $false
-$uncCredential        = $null   # [PSCredential] when $useUncAuth = $true: [PSCredential]::new("user@domain.tld", (ConvertTo-SecureString "password" -AsPlainText -Force))
+$uncCredential        = $null   # $uncCredential = [PSCredential]::new("user@domain.tld", (ConvertTo-SecureString "<-YOUR-PASSWORD->" -AsPlainText -Force))
 
 # ---------------------------[ Paths (computed) ]--------
 if (-not [string]::IsNullOrWhiteSpace($installerPathOverride)) {
@@ -118,9 +120,9 @@ function Complete-Script {
     param([int]$exitCode)
     $scriptEndTime = Get-Date
     $duration      = $scriptEndTime - $scriptStartTime
-    Write-Log "Script execution time: $($duration.ToString('hh\:mm\:ss\.ff'))" -Tag "Info"
-    Write-Log "Exit Code: $exitCode" -Tag "Info"
-    Write-Log "======== Script Completed ========" -Tag "End"
+    Write-Log "Runtime $($duration.ToString('hh\:mm\:ss\.ff'))" -Tag "Info"
+    Write-Log "Exit $exitCode" -Tag "Info"
+    Write-Log "====================  End  ====================" -Tag "End"
     exit $exitCode
 }
 
@@ -134,20 +136,20 @@ function Test-UncPathAccess {
     )
     if (-not $path.StartsWith("\\")) { return $true }
     if (Test-Path -Path $path -ErrorAction SilentlyContinue) {
-        Write-Log "UNC path accessible without credentials." -Tag "Success"
+        Write-Log "UNC OK (anonymous)." -Tag "Success"
         return $true
     }
     if (-not $useUncAuth -or -not $uncCredential) {
-        Write-Log "UNC path not accessible. Set `$useUncAuth = `$true and provide `$uncCredential (PSCredential) for Entra-joined devices." -Tag "Error"
+        Write-Log "UNC blocked; set useUncAuth + uncCredential." -Tag "Error"
         return $false
     }
     $parts = $path.TrimStart('\').Split('\', [System.StringSplitOptions]::RemoveEmptyEntries)
     if ($parts.Count -lt 2) {
-        Write-Log "Invalid UNC path: cannot extract share root." -Tag "Error"
+        Write-Log "UNC invalid (no share root)." -Tag "Error"
         return $false
     }
     $shareRoot = "\\$($parts[0])\$($parts[1])"
-    Write-Log "Establishing UNC credentials for share: ${shareRoot}" -Tag "Get"
+    Write-Log "UNC map: $shareRoot" -Tag "Get"
     try {
         $credUser = $uncCredential.UserName
         $credPass = $uncCredential.GetNetworkCredential().Password
@@ -157,14 +159,14 @@ function Test-UncPathAccess {
             return $false
         }
         if (Test-Path -Path $path -ErrorAction SilentlyContinue) {
-            Write-Log "UNC path accessible after authentication." -Tag "Success"
+            Write-Log "UNC OK (auth)." -Tag "Success"
             return $true
         }
-        Write-Log "UNC path still not accessible after authentication." -Tag "Error"
+        Write-Log "UNC still blocked after auth." -Tag "Error"
         return $false
     }
     catch {
-        Write-Log "UNC authentication failed: $($_.Exception.Message)" -Tag "Error"
+        Write-Log "UNC auth error: $($_.Exception.Message)" -Tag "Error"
         return $false
     }
 }
@@ -181,13 +183,13 @@ function Test-PathWithRetry {
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
         if (Test-Path -Path $path) {
             if ($attempt -gt 1) {
-                Write-Log "Path became available on attempt $attempt of ${maxRetries}: $path" -Tag "Success"
+                Write-Log "Path OK (${attempt}/${maxRetries}): $path" -Tag "Success"
             }
             return $true
         }
 
         if ($attempt -lt $maxRetries) {
-            Write-Log "Path not found (attempt $attempt of $maxRetries): $path. Retrying in $retryDelaySeconds seconds..." -Tag "Info"
+            Write-Log "Missing ${attempt}/${maxRetries}: $path, retry ${retryDelaySeconds}s" -Tag "Info"
             Start-Sleep -Seconds $retryDelaySeconds
         }
     }
@@ -329,26 +331,26 @@ function Invoke-InstallProcess {
         [string]$context = "Install"
     )
     if ([string]::IsNullOrWhiteSpace($filePath)) {
-        Write-Log "FilePath is empty or null. Cannot start $context process." -Tag "Error"
+        Write-Log "FilePath empty; skip $context." -Tag "Error"
         return $null
     }
-    Write-Log "Starting $context process: '$filePath' $argumentList" -Tag "Run"
+    Write-Log "${context}: '$filePath' $argumentList" -Tag "Run"
     try {
         $processParams = @{ FilePath = $filePath; Wait = $true; PassThru = $true; NoNewWindow = $true }
         if (-not [string]::IsNullOrWhiteSpace($argumentList)) { $processParams['ArgumentList'] = $argumentList }
         $process = Start-Process @processParams
         if ($null -eq $process) {
-            Write-Log "Start-Process did not return a process object. $context result unknown." -Tag "Error"
+            Write-Log "Start-Process returned no object ($context)." -Tag "Error"
             return $null
         }
     }
     catch {
-        Write-Log "$context process failed to start: $($_.Exception.Message)" -Tag "Error"
-        Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+        Write-Log "$context start error: $($_.Exception.Message)" -Tag "Error"
+        Write-Log "$($_ | Out-String)" -Tag "Debug"
         return $null
     }
-    Write-Log "$context process ID: $($process.Id)" -Tag "Debug"
-    Write-Log "$context exit code: $($process.ExitCode)" -Tag "Info"
+    Write-Log "PID $($process.Id) ($context)" -Tag "Debug"
+    Write-Log "Exit $($process.ExitCode) ($context)" -Tag "Info"
     return $process
 }
 
@@ -360,27 +362,32 @@ function Test-InstallationVerification {
         [string[]]$registryPaths,
         [int]$maxRetries = 3,
         [int]$retryDelay = 5,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = ""
     )
-    Write-Log "Waiting for registry keys to be populated..." -Tag "Info"
+    Write-Log "Wait for uninstall registry..." -Tag "Info"
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
         if ($attempt -gt 1) {
-            Write-Log "Retry attempt $attempt of $maxRetries after $retryDelay seconds..." -Tag "Info"
+            Write-Log "Verify retry $attempt/$maxRetries (${retryDelay}s)" -Tag "Info"
             Start-Sleep -Seconds $retryDelay
         }
         try {
-            $applicationFound = Test-ApplicationInstalled -applicationName $applicationName -registryPaths $registryPaths -useWildcardMatching $useWildcardMatching
+            $applicationFound = Test-ApplicationInstalled -applicationName $applicationName -registryPaths $registryPaths -useWildcardMatching $useWildcardMatching -applicationVersion $applicationVersion
             if ($applicationFound) {
-                Write-Log "$applicationName is installed and verified in registry." -Tag "Success"
                 return $true
             }
         }
         catch {
-            Write-Log "Exception during verification attempt $attempt : $($_.Exception.Message)" -Tag "Error"
-            Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+            Write-Log "Verify $attempt error: $($_.Exception.Message)" -Tag "Error"
+            Write-Log "$($_ | Out-String)" -Tag "Debug"
         }
     }
-    Write-Log "$applicationName was not found in registry after $maxRetries attempts. Installation may have failed." -Tag "Error"
+    if ([string]::IsNullOrWhiteSpace($applicationVersion)) {
+        Write-Log "Registry miss $maxRetries tries: $applicationName" -Tag "Error"
+    }
+    else {
+        Write-Log "Registry miss $maxRetries tries: $applicationName $applicationVersion" -Tag "Error"
+    }
     return $false
 }
 
@@ -390,38 +397,94 @@ function Test-ApplicationInstalled {
     param(
         [string]$applicationName,
         [string[]]$registryPaths,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = "",
+        [switch]$SkipIntroLog
     )
-    if ($useWildcardMatching) {
-        Write-Log "Checking registry for application '$applicationName' (wildcard matching enabled)." -Tag "Get"
-    } else {
-        Write-Log "Checking registry for application '$applicationName'." -Tag "Get"
+    $checkVersion = -not [string]::IsNullOrWhiteSpace($applicationVersion)
+    if (-not $SkipIntroLog) {
+        if ($useWildcardMatching) {
+            if ($checkVersion) {
+                Write-Log "Reg: '$applicationName' v '$applicationVersion' (wildcard)" -Tag "Get"
+            }
+            else {
+                Write-Log "Reg: '$applicationName' (wildcard)" -Tag "Get"
+            }
+        }
+        else {
+            if ($checkVersion) {
+                Write-Log "Reg: '$applicationName' v '$applicationVersion'" -Tag "Get"
+            }
+            else {
+                Write-Log "Reg: '$applicationName'" -Tag "Get"
+            }
+        }
     }
     foreach ($registryPath in $registryPaths) {
         if (-not (Test-Path -Path $registryPath)) {
-            Write-Log "Registry path '$registryPath' does not exist, skipping." -Tag "Debug"
+            Write-Log "Skip missing: $registryPath" -Tag "Debug"
             continue
         }
-        Write-Log "Searching in registry path: $registryPath" -Tag "Get"
+        Write-Log "Reg scan: $registryPath" -Tag "Debug"
         $subKeys = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
         if ($null -eq $subKeys -or $subKeys.Count -eq 0) {
-            Write-Log "No subkeys found under: $registryPath" -Tag "Debug"
+            Write-Log "No subkeys: $registryPath" -Tag "Debug"
             continue
         }
-        Write-Log "Found $($subKeys.Count) subkeys under: $registryPath" -Tag "Debug"
+        Write-Log "Subkeys $($subKeys.Count): $registryPath" -Tag "Debug"
         foreach ($subKey in $subKeys) {
             $properties = Get-ItemProperty -Path $subKey.PSPath -ErrorAction SilentlyContinue
             if ($null -eq $properties) { continue }
             $displayName = $properties.DisplayName
-            if ($displayName) { Write-Log "Found product: '$displayName'" -Tag "Debug" }
-            $isMatch = if ($useWildcardMatching) { $displayName -like $applicationName } else { $displayName -eq $applicationName }
-            if ($isMatch) {
-                Write-Log "Match found for application: '$displayName'" -Tag "Success"
+            $displayVersion = $properties.DisplayVersion
+            if ($displayName) {
+                if ($checkVersion) {
+                    Write-Log "Row: '$displayName' v '$displayVersion'" -Tag "Debug"
+                }
+                else {
+                    Write-Log "Row: '$displayName'" -Tag "Debug"
+                }
+            }
+            $nameMatch = if ($useWildcardMatching) { $displayName -like $applicationName } else { $displayName -eq $applicationName }
+            $versionMatch = if ($checkVersion) { $displayVersion -eq $applicationVersion } else { $true }
+            if ($nameMatch -and $versionMatch) {
+                $matchedKeyPath = Join-Path -Path $registryPath -ChildPath $subKey.PSChildName
+                $verPart = if ([string]::IsNullOrWhiteSpace($displayVersion)) { '' } else { " $displayVersion" }
+                Write-Log "Registry OK: $displayName$verPart @ $matchedKeyPath" -Tag "Success"
                 return $true
             }
         }
     }
     return $false
+}
+
+# Returns the first uninstall registry row whose DisplayName matches $applicationName (no logging).
+function Get-FirstUninstallEntryMatchingName {
+    [CmdletBinding()]
+    param(
+        [string]$applicationName,
+        [string[]]$registryPaths,
+        [bool]$useWildcardMatching = $false
+    )
+    foreach ($registryPath in $registryPaths) {
+        if (-not (Test-Path -Path $registryPath)) { continue }
+        $subKeys = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
+        if ($null -eq $subKeys -or $subKeys.Count -eq 0) { continue }
+        foreach ($subKey in $subKeys) {
+            $properties = Get-ItemProperty -Path $subKey.PSPath -ErrorAction SilentlyContinue
+            if ($null -eq $properties) { continue }
+            $displayName = $properties.DisplayName
+            if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
+            $nameMatch = if ($useWildcardMatching) { $displayName -like $applicationName } else { $displayName -eq $applicationName }
+            if ($nameMatch) {
+                return [pscustomobject]@{
+                    DisplayName    = $displayName
+                    DisplayVersion = $properties.DisplayVersion
+                }
+            }
+        }
+    }
+    return $null
 }
 
 # ---------------------------[ MSI Arguments Function ]-----------------------
@@ -433,7 +496,7 @@ function Get-MsiInstallArgument {
     )
 
     if ([string]::IsNullOrWhiteSpace($installerPath)) {
-        Write-Log "InstallerPath is empty or null. Cannot construct MSI arguments." -Tag "Error"
+        Write-Log "InstallerPath empty; no MSI args." -Tag "Error"
         return $null
     }
 
@@ -444,7 +507,7 @@ function Get-MsiInstallArgument {
         $argsTrimmed = $arguments.Trim()
 
         if ($argsTrimmed -match '/(?:i|package)') {
-            Write-Log "Warning: Arguments contain /i or /package which conflicts with required installer path argument." -Tag "Info"
+            Write-Log "Args: /i or /package may conflict with script MSI path." -Tag "Info"
         }
 
         $fullArguments += " $argsTrimmed"
@@ -465,7 +528,7 @@ function Invoke-ShortcutCreation {
     if ($null -eq $shortcuts -or $shortcuts.Count -eq 0) { return }
 
     if (-not (Test-Path -Path $baseFolder)) {
-        Write-Log "Shortcut folder does not exist, skipping ${$locationName}: $baseFolder" -Tag "Debug"
+        Write-Log "No folder ($locationName): $baseFolder" -Tag "Debug"
         return
     }
 
@@ -474,7 +537,7 @@ function Invoke-ShortcutCreation {
         $targetPath = [System.Environment]::ExpandEnvironmentVariables($entry.TargetPath)
 
         if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($targetPath)) {
-            Write-Log "Shortcut entry missing Name or TargetPath, skipping." -Tag "Debug"
+            Write-Log "Shortcut entry incomplete; skip." -Tag "Debug"
             continue
         }
 
@@ -490,12 +553,12 @@ function Invoke-ShortcutCreation {
         $shortcutPath = Join-Path -Path $destinationFolder -ChildPath "$shortcutName.lnk"
 
         if (-not (Test-Path -Path $targetPath)) {
-            Write-Log "Target not found, skipping shortcut '$name' -> '$targetPath'" -Tag "Info"
+            Write-Log "Skip shortcut (no target): '$name' -> '$targetPath'" -Tag "Info"
             continue
         }
 
         if (Test-Path -Path $shortcutPath) {
-            Write-Log "Shortcut already exists: $locationName\$name.lnk" -Tag "Success"
+            Write-Log "Shortcut exists: $locationName\$name.lnk" -Tag "Success"
             continue
         }
 
@@ -510,51 +573,87 @@ function Invoke-ShortcutCreation {
             if ($entry.WorkingDirectory) { $shortcut.WorkingDirectory = [System.Environment]::ExpandEnvironmentVariables($entry.WorkingDirectory) }
             $shortcut.Save()
             [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
-            Write-Log "Created shortcut: $locationName\$name.lnk -> $targetPath" -Tag "Success"
+            Write-Log "Shortcut: $locationName\$name.lnk -> $targetPath" -Tag "Success"
         }
         catch {
-            Write-Log "Failed to create shortcut '$name': $($_.Exception.Message)" -Tag "Error"
-            Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+            Write-Log "Shortcut fail '$name': $($_.Exception.Message)" -Tag "Error"
+            Write-Log "$($_ | Out-String)" -Tag "Debug"
         }
     }
 }
 
 # ---------------------------[ Script Start ]------------------------------------
-Write-Log "======== Script Started ========" -Tag "Start"
-Write-Log "ComputerName: $env:COMPUTERNAME | User: $env:USERNAME | App: $applicationName" -Tag "Info"
+Write-Log "====================  Start  ====================" -Tag "Start"
+Write-Log "Host $env:COMPUTERNAME | $env:USERNAME | $applicationName" -Tag "Info"
 
 if ([string]::IsNullOrWhiteSpace($applicationName)) {
-    Write-Log "Application name is not configured. Please set `$applicationName." -Tag "Error"
+    Write-Log "Set `$applicationName." -Tag "Error"
     Complete-Script -exitCode 1
 }
 
 # ---------------------------[ Installer Detection ]------------------------------
 # Validate that the MSI installer file exists before attempting installation
-Write-Log "Validating installer path..." -Tag "Get"
+Write-Log "Installer path..." -Tag "Get"
 
 if (-not (Test-UncPathAccess -path $installerPath -useUncAuth $useUncAuth -uncCredential $uncCredential)) {
     Complete-Script -exitCode 1
 }
 
 if (-not (Test-PathWithRetry -path $installerPath -maxRetries $script:fileCheckMaxRetries -retryDelaySeconds $script:fileCheckRetryDelaySeconds)) {
-    Write-Log "Installer not found at path: $installerPath" -Tag "Error"
+    Write-Log "Installer missing: $installerPath" -Tag "Error"
     Complete-Script -exitCode 1
 }
 
-Write-Log "Installer found at path: $installerPath" -Tag "Success"
+Write-Log "Installer: $installerPath" -Tag "Success"
+
+# ---------------------------[ Pre-install registry check ]--------------------
+if (-not [string]::IsNullOrWhiteSpace($applicationVersion)) {
+    if ($useWildcardMatching) {
+        Write-Log "Pre reg: '$applicationName' v '$applicationVersion' (wildcard)" -Tag "Get"
+    }
+    else {
+        Write-Log "Pre reg: '$applicationName' v '$applicationVersion'" -Tag "Get"
+    }
+    $preInstallParams = @{
+        applicationName     = $applicationName
+        registryPaths       = $registrySearchPaths
+        useWildcardMatching = $useWildcardMatching
+        applicationVersion  = $applicationVersion
+        SkipIntroLog        = $true
+    }
+    if (Test-ApplicationInstalled @preInstallParams) {
+        Write-Log "Already installed (name+version); skip setup." -Tag "Success"
+        if ($createShortcuts) {
+            Write-Log "Shortcuts..." -Tag "Get"
+            $publicDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+            $allUsersStartMenu = [Environment]::GetFolderPath('CommonStartMenu')
+            Invoke-ShortcutCreation -shortcuts $desktopShortcuts -baseFolder $publicDesktop -locationName "Public Desktop"
+            Invoke-ShortcutCreation -shortcuts $startMenuShortcuts -baseFolder $allUsersStartMenu -locationName "Start Menu"
+        }
+        Complete-Script -exitCode 0
+    }
+}
+elseif (-not [string]::IsNullOrWhiteSpace($applicationName)) {
+    Write-Log "Pre reg: '$applicationName' (name-only)" -Tag "Get"
+    $existingEntry = Get-FirstUninstallEntryMatchingName -applicationName $applicationName -registryPaths $registrySearchPaths -useWildcardMatching $useWildcardMatching
+    if ($null -ne $existingEntry) {
+        $versionLabel = if ([string]::IsNullOrWhiteSpace($existingEntry.DisplayVersion)) { '(empty or unset)' } else { $existingEntry.DisplayVersion }
+        Write-Log "Reg has '$($existingEntry.DisplayName)' v $versionLabel; continue install." -Tag "Info"
+    }
+}
 
 # ---------------------------[ Pending Reboot Check ]---------------------------
-Write-Log "Checking for pending system reboot..." -Tag "Get"
+Write-Log "Pending reboot..." -Tag "Get"
 $pendingReboot = Test-PendingReboot
 if ($pendingReboot) {
-    Write-Log "Pending reboot detected. MSI installation will proceed anyway. Intune can handle soft reboot after exit." -Tag "Info"
+    Write-Log "Reboot pending; continue (Intune may soft-reboot)." -Tag "Info"
 }
 else {
-    Write-Log "No pending reboot detected." -Tag "Success"
+    Write-Log "No reboot pending." -Tag "Success"
 }
 
 # ---------------------------[ Install ]-----------------------------------------
-Write-Log "Starting MSI installation for '$applicationName'." -Tag "Run"
+Write-Log "MSI install: $applicationName" -Tag "Run"
 
 $processExitCode = $null
 
@@ -562,11 +661,11 @@ try {
     $msiArguments = Get-MsiInstallArgument -installerPath $installerPath -arguments $installerArguments
 
     if ($null -eq $msiArguments) {
-        Write-Log "Failed to construct MSI arguments. Installation cannot proceed." -Tag "Error"
+        Write-Log "MSI args build failed." -Tag "Error"
         Complete-Script -exitCode 1
     }
 
-    Write-Log "Launching MSI installation via msiexec.exe with arguments: $msiArguments" -Tag "Debug"
+    Write-Log "msiexec $msiArguments" -Tag "Debug"
 
     $process = Invoke-InstallProcess -filePath "msiexec.exe" -argumentList $msiArguments -context "MSI installation"
 
@@ -574,31 +673,31 @@ try {
         $processExitCode = $process.ExitCode
         $exitMeaning = Get-MsiExitCodeMeaning -exitCode $process.ExitCode
 
-        Write-Log "MSI installer exit code: $($process.ExitCode) - $exitMeaning" -Tag "Info"
+        Write-Log "MSI exit $($process.ExitCode): $exitMeaning" -Tag "Info"
 
         if ($process.ExitCode -eq 0) {
-            Write-Log "MSI installation completed successfully." -Tag "Success"
+            Write-Log "MSI OK." -Tag "Success"
         }
         elseif ($process.ExitCode -eq 3010 -or $process.ExitCode -eq 1641) {
-            Write-Log "MSI installation completed successfully. Reboot required (exit code $($process.ExitCode)). Intune will handle soft reboot." -Tag "Info"
+            Write-Log "MSI OK; reboot $($process.ExitCode) (Intune soft-reboot)." -Tag "Info"
         }
         elseif ($process.ExitCode -eq 1602) {
-            Write-Log "MSI installation was canceled by user." -Tag "Info"
+            Write-Log "User canceled MSI (1602)." -Tag "Info"
         }
         else {
-            Write-Log "MSI installation returned exit code $($process.ExitCode): $exitMeaning" -Tag "Info"
+            Write-Log "MSI exit $($process.ExitCode): $exitMeaning" -Tag "Info"
         }
     }
     else {
-        Write-Log "Process object was null. Using exit code 1 for verification. Continuing to registry check..." -Tag "Info"
+        Write-Log "No process object; exit 1; verify reg." -Tag "Info"
         $processExitCode = 1
     }
 
-    Write-Log "MSI installer process has completed. Verifying installation via registry detection..." -Tag "Info"
+    Write-Log "MSI done; verify reg." -Tag "Info"
 }
 catch {
-    Write-Log "Exception during installation: $($_.Exception.Message)" -Tag "Error"
-    Write-Log "Exception details: $($_ | Out-String)" -Tag "Debug"
+    Write-Log "Install error: $($_.Exception.Message)" -Tag "Error"
+    Write-Log "$($_ | Out-String)" -Tag "Debug"
     Complete-Script -exitCode 1
 }
 
@@ -607,12 +706,13 @@ $verificationParams = @{
     applicationName       = $applicationName
     registryPaths         = $registrySearchPaths
     useWildcardMatching   = $useWildcardMatching
+    applicationVersion    = $applicationVersion
 }
 $verificationSuccess = Test-InstallationVerification @verificationParams
 
 if ($verificationSuccess) {
     if ($createShortcuts) {
-        Write-Log "Shortcut creation enabled. Checking and creating shortcuts..." -Tag "Get"
+        Write-Log "Shortcuts..." -Tag "Get"
         $publicDesktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
         $allUsersStartMenu = [Environment]::GetFolderPath('CommonStartMenu')
         Invoke-ShortcutCreation -shortcuts $desktopShortcuts -baseFolder $publicDesktop -locationName "Public Desktop"
@@ -621,11 +721,11 @@ if ($verificationSuccess) {
 
     $exitCode = if ($null -ne $processExitCode) { $processExitCode } else { 0 }
     $exitMeaning = Get-MsiExitCodeMeaning -exitCode $exitCode
-    Write-Log "Installation verified. Exiting with code $exitCode ($exitMeaning) for Intune to process." -Tag "Success"
+    Write-Log "OK; exit $exitCode ($exitMeaning)." -Tag "Success"
     Complete-Script -exitCode $exitCode
 }
 else {
     $exitCode = if ($null -ne $processExitCode) { $processExitCode } else { 1 }
-    Write-Log "Registry verification failed. Exiting with MSI code $exitCode for Intune to process." -Tag "Error"
+    Write-Log "Verify fail; exit $exitCode." -Tag "Error"
     Complete-Script -exitCode $exitCode
 }
