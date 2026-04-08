@@ -261,7 +261,7 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 
 **`$applicationVersion` - Registry DisplayVersion (optional)**
 
-Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` only uses `$applicationName` (and wildcards); post-uninstall validation checks that the matching display name is no longer in the uninstall registry.
+Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, `uninstall.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` uses the same rules: when set, it finds the uninstall row and validates removal using **both** `DisplayName` and `DisplayVersion` (string equality, no semver parsing).
 
 **How to find the DisplayVersion:**
 
@@ -451,7 +451,7 @@ The `$applicationName` variable must match the **exact `DisplayName`** value fro
 
 **`$applicationVersion` - Registry DisplayVersion (optional)**
 
-Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` only uses `$applicationName` (and wildcards); post-uninstall validation checks that the matching display name is no longer in the uninstall registry.
+Set `$applicationVersion` in `installExe.ps1`, `installMsi.ps1`, `uninstall.ps1`, and `detectionWithVersionCheck.ps1` to the **exact `DisplayVersion`** from the registry when you want version-specific behavior. Leave empty (`""`) for name-only checks (default). Install scripts verify both `DisplayName` and `DisplayVersion` after setup and may **exit early** before install if both already match (see **`$applicationVersion` in the install scripts**). `uninstall.ps1` uses the same rules: when set, it finds the uninstall row and validates removal using **both** `DisplayName` and `DisplayVersion` (string equality, no semver parsing).
 
 **How to find the DisplayVersion:**
 
@@ -532,11 +532,12 @@ Includes automatic post-uninstall validation and fallback mechanisms.
 
 ### 🔧 Parameters (top of `uninstall.ps1`)
 
-There is **no** `$applicationVersion` in uninstall: validation only checks that the **DisplayName** (with the same wildcard rules as install) no longer appears under `$registrySearchPaths`. File retries, wildcard handling, and logging use the defaults in the script unless you change them.
+`$applicationVersion` is **optional** (same semantics as install scripts). When **empty**, lookup and post-uninstall validation use **DisplayName** only (with the same wildcard rules as install). When **set**, the script matches **DisplayName + exact `DisplayVersion`** for discovery, validation, and fallback. Wildcards apply to the **name** only, not to the version string. File retries and logging use the defaults in the script unless you change them.
 
 | Variable | Purpose |
 | -------- | ------- |
 | `$applicationName` | Registry `DisplayName` for lookup and post-uninstall check. Supports wildcards (`*`, `?`, `[`, `]`). |
+| `$applicationVersion` | Optional. Exact registry `DisplayVersion`; when set, combined with `$applicationName` for lookup and validation. |
 | `$usePackagedUninstaller` | `$true` = use packaged EXE/MSI; `$false` = use registry `UninstallString`/`ModifyPath`. |
 | `$installerName` | Filename of packaged uninstaller (used only when `$usePackagedUninstaller = $true`). |
 | `$uninstallerArgumentsExe` | Arguments for non-MSI uninstallers (e.g. `/uninstall /silent`). |
@@ -590,6 +591,17 @@ $uninstallerArgumentsExe = '/uninstall /silent'
 $uninstallerArgumentsMsi = '/qn'
 ```
 
+**Scenario D2: Registry-based with DisplayName + DisplayVersion** (same string rules as `installExe.ps1` / `installMsi.ps1`)
+
+```powershell
+$applicationName         = "My Application"
+$applicationVersion      = "2.1.0"
+$usePackagedUninstaller  = $false
+$installerName           = "setup.exe"
+$uninstallerArgumentsExe = '/uninstall /silent'
+$uninstallerArgumentsMsi = '/qn'
+```
+
 **Scenario E: Packaged uninstaller on UNC share**
 
 ```powershell
@@ -615,20 +627,20 @@ $uncCredential        = [PSCredential]::new("svc.intune-install@domain.tld", (Co
   * MSI → `msiexec.exe /x "<path>" $uninstallerArgumentsMsi`
   * EXE → `"<path>" $uninstallerArgumentsExe`
 * 🧾 Logs path, arguments, PID, and exit code
-* ✅ Performs post-uninstall validation (checks registry with retries)
-* 🚪 Exits with the process exit code (0 = success, verified in registry)
+* ✅ **Registry is the truth anchor:** after the uninstall process finishes, the script **always** re-checks the uninstall registry (with retries) using `$applicationName` and optional `$applicationVersion`, even if the process returned a non-zero exit code
+* 🚪 **Exit codes:** if the targeted app is **no longer** in the registry → exit **`0`**, or **`3010`** when the uninstall was MSI and the process returned **`3010`** (reboot pending). If the process reported a non-zero code but the app **is** gone, the script still exits **`0`** (or **`3010`** as above) and logs that the installer exit was ignored. If the app **is still** present after the run (and any fallback), the script exits with a **non-zero** code: it keeps the **primary** uninstaller exit code when that code is already non-zero (e.g. **`1603`**); if the primary exit was **`0`** but validation failed, it exits **`1`** so Intune does not treat the job as success
 
 ### ✅ Mode B — Registry-Based Uninstall (`$usePackagedUninstaller = $false`)
 
-* 🔍 Searches uninstall registry keys for `DisplayName` matching `$applicationName` (exact match or wildcard match if `*` is present)
+* 🔍 Searches uninstall registry keys for a row matching `$applicationName` and, when set, **`DisplayVersion` == `$applicationVersion`** (exact string; wildcards only on the name)
 * 📖 Reads `UninstallString` and `ModifyPath` from registry. Prefers MSI when both exist; if `UninstallString` is non-MSI and `ModifyPath` is MSI, uses `ModifyPath` (and corrects `/I` → `/X` for msiexec)
 * 🧠 Automatically detects MSI vs EXE uninstallers
 * 🧠 If MSI → ensures `/qn` or `$uninstallerArgumentsMsi` is present
 * 🧠 If non-MSI → appends `$uninstallerArgumentsExe` (avoiding duplicates)
 * ▶️ Executes the uninstaller via `Start-Process`
-* ✅ Performs post-uninstall validation (checks registry with retries). On success the script logs **`Missing from reg.`**
-* 🔄 Fallback: if validation fails, searches for another `UninstallString` for the same app and retries once
-* 🚪 Exits with `0` on success (verified removal), `1` on error
+* ✅ **Registry is the truth anchor:** same post-uninstall validation as packaged mode (always runs after a started process). On success the script logs **`Missing from reg.`**
+* 🔄 **Fallback:** if the app is **still** in the registry after the primary run, the script looks for **another** `UninstallString` for the same **name (+ version if set)**, excluding the one already used, and retries **once** (registry mode only; packaged mode has no alternate-string fallback)
+* 🚪 **Exit codes:** same rules as Mode A (success → **`0`** or MSI **`3010`**; failure → non-zero primary code when informative, else **`1`** if the process had exited **`0`** but removal was not verified)
 
 ### 📁 Log Location
 
@@ -1018,13 +1030,13 @@ This ensures clean folder names without special characters.
 
 Wildcard support is available in **all scripts**:
 * ✅ `installExe.ps1` / `installMsi.ps1` - Skip-before-install when version is set, post-install verification, name-only path when version is empty (see **`$applicationVersion` in the install scripts**)
-* ✅ `uninstall.ps1` - Registry lookup and validation
+* ✅ `uninstall.ps1` - Registry or packaged uninstall; optional `$applicationVersion`; registry used as removal truth anchor; alternate `UninstallString` fallback (registry mode)
 * ✅ `detectionWithVersionCheck.ps1` - DisplayName matching (version still requires exact match)
 * ✅ `detectionWithoutVersionCheck.ps1` - DisplayName matching
 
 ### 📌 Important Notes
 
-1. **Version matching:** In `detectionWithVersionCheck.ps1`, the `DisplayName` uses wildcard matching, but `DisplayVersion` still requires an exact match.
+1. **Version matching:** In `detectionWithVersionCheck.ps1`, the `DisplayName` uses wildcard matching, but `DisplayVersion` still requires an exact match. The same **exact `DisplayVersion`** rule applies in `uninstall.ps1` when `$applicationVersion` is set.
 
 2. **Backward compatibility:** If your `$applicationName` doesn't contain wildcard characters, the scripts will use exact matching (`-eq`) as before. No changes needed for existing deployments.
 
@@ -1054,7 +1066,8 @@ Wildcard support is available in **all scripts**:
 ### ⚠️ Uninstall Issues
 
 * Verify whether `$usePackagedUninstaller` is set as intended
-* If using registry mode, confirm the `DisplayName` exactly matches `$applicationName`
+* If using registry mode, confirm the `DisplayName` matches `$applicationName` (exact or wildcard on the name only). If `$applicationVersion` is set, confirm **`DisplayVersion`** matches **exactly** (same rules as install scripts)
+* The script treats **uninstall registry** presence of the targeted name (+ version if set) as the source of truth: a misleading process exit **0** still results in failure (**exit `1`**) if the app row remains after retries and fallback
 * Inspect the raw `UninstallString` on a test device and try it manually
 * Check if the uninstaller requires different arguments than configured
 * Review logs for fallback uninstall attempts

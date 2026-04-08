@@ -3,6 +3,7 @@ $scriptStartTime = Get-Date
 
 # ---------------------------[ Configuration ]------------------------------
 $applicationName         = "__REGISTRY_DISPLAY_NAME__"
+$applicationVersion      = "" # Optional. Exact DisplayVersion (same as installExe/installMsi). When set: match DisplayName + DisplayVersion. When empty: name only.
 $usePackagedUninstaller  = $false
 $installerName           = "setup.exe"
 $uninstallerArgumentsExe = '/uninstall /silent'
@@ -194,13 +195,26 @@ function Test-ApplicationInRegistry {
         [string]$applicationName,
         [string[]]$registryPaths,
         [switch]$suppressLogging,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = ""
     )
+    $checkVersion = -not [string]::IsNullOrWhiteSpace($applicationVersion)
     if (-not $suppressLogging) {
         if ($useWildcardMatching) {
-            Write-Log "Reg: '$applicationName' (wildcard)" -Tag "Get"
-        } else {
-            Write-Log "Reg: '$applicationName'" -Tag "Get"
+            if ($checkVersion) {
+                Write-Log "Reg: '$applicationName' v '$applicationVersion' (wildcard)" -Tag "Get"
+            }
+            else {
+                Write-Log "Reg: '$applicationName' (wildcard)" -Tag "Get"
+            }
+        }
+        else {
+            if ($checkVersion) {
+                Write-Log "Reg: '$applicationName' v '$applicationVersion'" -Tag "Get"
+            }
+            else {
+                Write-Log "Reg: '$applicationName'" -Tag "Get"
+            }
         }
     }
     foreach ($registryPath in $registryPaths) {
@@ -214,15 +228,22 @@ function Test-ApplicationInRegistry {
             $properties = Get-ItemProperty -Path $subkey.PSPath -ErrorAction SilentlyContinue
             if ($null -eq $properties) { continue }
             $displayName = $properties.DisplayName
-            $isMatch = if ($useWildcardMatching) { $displayName -like $applicationName } else { $displayName -eq $applicationName }
-            if ($isMatch) {
+            $displayVersion = $properties.DisplayVersion
+            $nameMatch = if ($useWildcardMatching) { $displayName -like $applicationName } else { $displayName -eq $applicationName }
+            $versionMatch = if ($checkVersion) { $displayVersion -eq $applicationVersion } else { $true }
+            if ($nameMatch -and $versionMatch) {
                 $matchedKeyPath = Join-Path -Path $registryPath -ChildPath $subkey.PSChildName
                 Write-Log "Reg hit: '$applicationName' @ $matchedKeyPath" -Tag "Debug"
                 return $true
             }
         }
     }
-    Write-Log "Reg miss: '$applicationName'" -Tag "Debug"
+    if ($checkVersion) {
+        Write-Log "Reg miss: '$applicationName' v '$applicationVersion'" -Tag "Debug"
+    }
+    else {
+        Write-Log "Reg miss: '$applicationName'" -Tag "Debug"
+    }
     return $false
 }
 
@@ -234,7 +255,8 @@ function Test-PostUninstallValidation {
         [string[]]$registryPaths,
         [int]$maxRetries = 3,
         [int]$retryDelay = 5,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = ""
     )
     Write-Log "Post-uninstall verify..." -Tag "Info"
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
@@ -242,7 +264,7 @@ function Test-PostUninstallValidation {
             Write-Log "Verify retry ${attempt}/${maxRetries} (${retryDelay}s)" -Tag "Info"
             Start-Sleep -Seconds $retryDelay
         }
-        $applicationRemoved = -not (Test-ApplicationInRegistry -applicationName $applicationName -registryPaths $registryPaths -suppressLogging -useWildcardMatching $useWildcardMatching)
+        $applicationRemoved = -not (Test-ApplicationInRegistry -applicationName $applicationName -registryPaths $registryPaths -suppressLogging -useWildcardMatching $useWildcardMatching -applicationVersion $applicationVersion)
         if ($applicationRemoved) {
             Write-Log "Missing from reg." -Tag "Success"
             return $true
@@ -359,13 +381,26 @@ function Get-ApplicationUninstallString {
         [string]$applicationName,
         [string[]]$registryPaths,
         [string]$excludeUninstallString = $null,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = ""
     )
 
+    $checkVersion = -not [string]::IsNullOrWhiteSpace($applicationVersion)
     if ($useWildcardMatching) {
-        Write-Log "Find uninstall: '$applicationName' (wildcard)" -Tag "Get"
-    } else {
-        Write-Log "Find uninstall: '$applicationName'" -Tag "Get"
+        if ($checkVersion) {
+            Write-Log "Find uninstall: '$applicationName' v '$applicationVersion' (wildcard)" -Tag "Get"
+        }
+        else {
+            Write-Log "Find uninstall: '$applicationName' (wildcard)" -Tag "Get"
+        }
+    }
+    else {
+        if ($checkVersion) {
+            Write-Log "Find uninstall: '$applicationName' v '$applicationVersion'" -Tag "Get"
+        }
+        else {
+            Write-Log "Find uninstall: '$applicationName'" -Tag "Get"
+        }
     }
 
     foreach ($registryPath in $registryPaths) {
@@ -387,20 +422,27 @@ function Get-ApplicationUninstallString {
             if ($null -eq $properties) { continue }
 
             $displayName = $properties.DisplayName
+            $displayVersion = $properties.DisplayVersion
             $uninstallString = $properties.UninstallString
             $modifyPath = $properties.ModifyPath
 
             if ($displayName) {
-                Write-Log "Row: '$displayName'" -Tag "Debug"
+                if ($checkVersion) {
+                    Write-Log "Row: '$displayName' v '$displayVersion'" -Tag "Debug"
+                }
+                else {
+                    Write-Log "Row: '$displayName'" -Tag "Debug"
+                }
             }
 
-            $isMatch = if ($useWildcardMatching) {
+            $nameMatch = if ($useWildcardMatching) {
                 $displayName -like $applicationName
             } else {
                 $displayName -eq $applicationName
             }
+            $versionMatch = if ($checkVersion) { $displayVersion -eq $applicationVersion } else { $true }
 
-            if (-not $isMatch) { continue }
+            if (-not ($nameMatch -and $versionMatch)) { continue }
 
             $matchedKeyPath = Join-Path -Path $registryPath -ChildPath $subkey.PSChildName
             Write-Log "Found: '$displayName' @ $matchedKeyPath" -Tag "Success"
@@ -628,6 +670,14 @@ function Get-ProcessedUninstallerCommand {
     }
 }
 
+# ---------------------------[ Failure exit code (registry is truth anchor) ]----
+function Resolve-FailureExitCode {
+    [CmdletBinding()]
+    param([int]$PrimaryExitCode)
+    if ($PrimaryExitCode -eq 0) { return 1 }
+    return $PrimaryExitCode
+}
+
 # ---------------------------[ Execute Uninstall with Validation Function ]-----
 function Invoke-UninstallWithValidation {
     [CmdletBinding()]
@@ -639,8 +689,16 @@ function Invoke-UninstallWithValidation {
         [string[]]$registryPaths,
         [string]$context = "Uninstall",
         [string]$originalUninstallString = $null,
-        [bool]$useWildcardMatching = $false
+        [bool]$useWildcardMatching = $false,
+        [string]$applicationVersion = ""
     )
+
+    $validationParams = @{
+        applicationName     = $applicationName
+        registryPaths       = $registryPaths
+        useWildcardMatching = $useWildcardMatching
+        applicationVersion  = $applicationVersion
+    }
 
     try {
         $process = Invoke-UninstallProcess -filePath $filePath -argumentList $argumentList -context $context
@@ -649,107 +707,97 @@ function Invoke-UninstallWithValidation {
             return @{ Success = $false; ExitCode = 1 }
         }
 
-        $isSuccessCode = $process.ExitCode -eq 0 -or ($isMsi -and $process.ExitCode -eq 3010)
+        $primaryExitCode = $process.ExitCode
+        $isSuccessCode = $primaryExitCode -eq 0 -or ($isMsi -and $primaryExitCode -eq 3010)
 
         if ($isSuccessCode) {
-            if ($process.ExitCode -eq 3010) {
+            if ($primaryExitCode -eq 3010) {
                 Write-Log "Uninstall OK; reboot 3010." -Tag "Info"
             }
             else {
-                Write-Log "Uninstall exit $($process.ExitCode): $applicationName" -Tag "Success"
-            }
-
-            $validationParams = @{
-                applicationName       = $applicationName
-                registryPaths         = $registryPaths
-                useWildcardMatching   = $useWildcardMatching
-            }
-            $validationSuccess = Test-PostUninstallValidation @validationParams
-
-            if ($validationSuccess) {
-                return @{ Success = $true; ExitCode = $process.ExitCode }
-            }
-            else {
-                Write-Log "Uninstall OK but verify failed." -Tag "Error"
-                
-                Write-Log "Fallback: alt UninstallString..." -Tag "Info"
-                
-                if ([string]::IsNullOrWhiteSpace($originalUninstallString)) {
-                    Write-Log "No original UninstallString; no fallback." -Tag "Error"
-                    return @{ Success = $false; ExitCode = 1 }
-                }
-
-                $alternativeParams = @{
-                    applicationName         = $applicationName
-                    registryPaths           = $registryPaths
-                    excludeUninstallString  = $originalUninstallString
-                    useWildcardMatching     = $useWildcardMatching
-                }
-                $alternativeUninstallString = Get-ApplicationUninstallString @alternativeParams
-                
-                if (-not [string]::IsNullOrWhiteSpace($alternativeUninstallString)) {
-                    Write-Log "Alt UninstallString; run fallback." -Tag "Info"
-                    Write-Log "Alt string: $alternativeUninstallString" -Tag "Debug"
-                    
-                    $fallbackCommand = Get-ProcessedUninstallerCommand -UninstallString $alternativeUninstallString
-                    
-                    if ($null -ne $fallbackCommand) {
-                        Write-Log "Fallback uninstall..." -Tag "Run"
-                        $fallbackProcessParams = @{
-                            filePath      = $fallbackCommand.FilePath
-                            argumentList  = $fallbackCommand.Arguments
-                            context       = "Fallback uninstall"
-                        }
-                        $fallbackProcess = Invoke-UninstallProcess @fallbackProcessParams
-                        
-                        if ($null -ne $fallbackProcess) {
-                            $fallbackSuccessCode = $fallbackProcess.ExitCode -eq 0 -or ($fallbackCommand.IsMsi -and $fallbackProcess.ExitCode -eq 3010)
-                            
-                            if ($fallbackSuccessCode) {
-                                Write-Log "Fallback exit $($fallbackProcess.ExitCode)" -Tag "Success"
-                                
-                                Write-Log "Re-verify after fallback..." -Tag "Info"
-                                $fallbackValidationParams = @{
-                                    applicationName       = $applicationName
-                                    registryPaths         = $registryPaths
-                                    useWildcardMatching   = $useWildcardMatching
-                                }
-                                $fallbackValidationSuccess = Test-PostUninstallValidation @fallbackValidationParams
-                                
-                                if ($fallbackValidationSuccess) {
-                                    Write-Log "Fallback + verify OK." -Tag "Success"
-                                    return @{ Success = $true; ExitCode = $fallbackProcess.ExitCode }
-                                }
-                                else {
-                                    Write-Log "Fallback OK; verify still fail." -Tag "Error"
-                                    return @{ Success = $false; ExitCode = 1 }
-                                }
-                            }
-                            else {
-                                Write-Log "Fallback exit $($fallbackProcess.ExitCode) (fail)" -Tag "Error"
-                                return @{ Success = $false; ExitCode = 1 }
-                            }
-                        }
-                        else {
-                            Write-Log "Fallback start failed." -Tag "Error"
-                            return @{ Success = $false; ExitCode = 1 }
-                        }
-                    }
-                    else {
-                        Write-Log "Alt UninstallString parse fail." -Tag "Error"
-                        return @{ Success = $false; ExitCode = 1 }
-                    }
-                }
-                else {
-                    Write-Log "No alt UninstallString." -Tag "Error"
-                    return @{ Success = $false; ExitCode = 1 }
-                }
+                Write-Log "Uninstall exit ${primaryExitCode}: $applicationName" -Tag "Success"
             }
         }
         else {
-            Write-Log "${context} exit $($process.ExitCode) (fail)" -Tag "Error"
-            return @{ Success = $false; ExitCode = $process.ExitCode }
+            Write-Log "${context} exit ${primaryExitCode} (non-success); verifying registry anyway." -Tag "Error"
         }
+
+        $validationSuccess = Test-PostUninstallValidation @validationParams
+
+        if ($validationSuccess) {
+            $successExit = if ($isMsi -and $primaryExitCode -eq 3010) { 3010 } else { 0 }
+            if ($successExit -eq 0 -and $primaryExitCode -ne 0 -and -not ($isMsi -and $primaryExitCode -eq 3010)) {
+                Write-Log "Removed from registry; ignoring uninstaller exit $primaryExitCode." -Tag "Info"
+            }
+            return @{ Success = $true; ExitCode = $successExit }
+        }
+
+        if ($isSuccessCode) {
+            Write-Log "Uninstall OK but verify failed." -Tag "Error"
+        }
+        else {
+            Write-Log "Still in registry after non-success exit $primaryExitCode." -Tag "Error"
+        }
+
+        Write-Log "Fallback: alt UninstallString..." -Tag "Info"
+
+        if ([string]::IsNullOrWhiteSpace($originalUninstallString)) {
+            Write-Log "No original UninstallString; no fallback." -Tag "Error"
+            return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
+        }
+
+        $alternativeParams = @{
+            applicationName         = $applicationName
+            registryPaths           = $registryPaths
+            excludeUninstallString  = $originalUninstallString
+            useWildcardMatching     = $useWildcardMatching
+            applicationVersion      = $applicationVersion
+        }
+        $alternativeUninstallString = Get-ApplicationUninstallString @alternativeParams
+
+        if ([string]::IsNullOrWhiteSpace($alternativeUninstallString)) {
+            Write-Log "No alt UninstallString." -Tag "Error"
+            return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
+        }
+
+        Write-Log "Alt UninstallString; run fallback." -Tag "Info"
+        Write-Log "Alt string: $alternativeUninstallString" -Tag "Debug"
+
+        $fallbackCommand = Get-ProcessedUninstallerCommand -UninstallString $alternativeUninstallString
+
+        if ($null -eq $fallbackCommand) {
+            Write-Log "Alt UninstallString parse fail." -Tag "Error"
+            return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
+        }
+
+        Write-Log "Fallback uninstall..." -Tag "Run"
+        $fallbackProcess = Invoke-UninstallProcess -filePath $fallbackCommand.FilePath -argumentList $fallbackCommand.Arguments -context "Fallback uninstall"
+
+        if ($null -eq $fallbackProcess) {
+            Write-Log "Fallback start failed." -Tag "Error"
+            return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
+        }
+
+        $fallbackSuccessCode = $fallbackProcess.ExitCode -eq 0 -or ($fallbackCommand.IsMsi -and $fallbackProcess.ExitCode -eq 3010)
+
+        if (-not $fallbackSuccessCode) {
+            Write-Log "Fallback exit $($fallbackProcess.ExitCode) (fail)" -Tag "Error"
+            return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
+        }
+
+        Write-Log "Fallback exit $($fallbackProcess.ExitCode)" -Tag "Success"
+
+        Write-Log "Re-verify after fallback..." -Tag "Info"
+        $fallbackValidationSuccess = Test-PostUninstallValidation @validationParams
+
+        if ($fallbackValidationSuccess) {
+            Write-Log "Fallback + verify OK." -Tag "Success"
+            $fallbackExit = if ($fallbackCommand.IsMsi -and $fallbackProcess.ExitCode -eq 3010) { 3010 } else { 0 }
+            return @{ Success = $true; ExitCode = $fallbackExit }
+        }
+
+        Write-Log "Fallback OK; verify still fail." -Tag "Error"
+        return @{ Success = $false; ExitCode = (Resolve-FailureExitCode -PrimaryExitCode $primaryExitCode) }
     }
     catch {
         Write-Log "${context} error: $($_.Exception.Message)" -Tag "Error"
@@ -834,6 +882,7 @@ if ($usePackagedUninstaller) {
         registryPaths         = $registrySearchPaths
         context               = "Packaged uninstall"
         useWildcardMatching   = $useWildcardMatching
+        applicationVersion    = $applicationVersion
     }
     $result = Invoke-UninstallWithValidation @uninstallParams
 
@@ -841,10 +890,15 @@ if ($usePackagedUninstaller) {
 }
 else {
 
-    $uninstallString = Get-ApplicationUninstallString -ApplicationName $applicationName -registryPaths $registrySearchPaths -useWildcardMatching $useWildcardMatching
+    $uninstallString = Get-ApplicationUninstallString -ApplicationName $applicationName -registryPaths $registrySearchPaths -useWildcardMatching $useWildcardMatching -applicationVersion $applicationVersion
 
     if ($null -eq $uninstallString) {
-        Write-Log "No uninstall cmd: '$applicationName' (reg miss or empty string)." -Tag "Error"
+        if ([string]::IsNullOrWhiteSpace($applicationVersion)) {
+            Write-Log "No uninstall cmd: '$applicationName' (reg miss or empty string)." -Tag "Error"
+        }
+        else {
+            Write-Log "No uninstall cmd: '$applicationName' v '$applicationVersion' (reg miss or empty string)." -Tag "Error"
+        }
         Complete-Script -exitCode 1
     }
 
@@ -862,6 +916,7 @@ else {
         context                   = "Registry-based uninstall"
         originalUninstallString   = $uninstallString
         useWildcardMatching       = $useWildcardMatching
+        applicationVersion        = $applicationVersion
     }
     $result = Invoke-UninstallWithValidation @uninstallParams
 
